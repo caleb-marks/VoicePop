@@ -127,7 +127,7 @@ public enum PopcornRenderer {
         drawHaze(ctx: &ctx, cx: cx, bagTop: bagTop, scene: scene)
         drawFlying(ctx: &ctx, front: false, scene: scene)
 
-        // Ground shadow under bag — widens slightly as the bag squashes
+        // Ground shadow under bag - widens slightly as the bag squashes
         let shadowRect = CGRect(
             x: cx - Tunables.baseHalf - 6 - squashOnly,
             y: bagBottom - 4,
@@ -198,7 +198,7 @@ public enum PopcornRenderer {
             layer.fill(bag, with: .color(.black.opacity(0.14)))
         }
 
-        // Dark interior / rear ellipse behind heap — matches the rim's inner opening
+        // Dark interior / rear ellipse behind heap - matches the rim's inner opening
         let innerRx = Tunables.mouthHalf - Tunables.rimBand
         let innerRy = max(2, mouthSag - Tunables.rimBand * 0.55)
         let interiorRect = CGRect(
@@ -229,7 +229,7 @@ public enum PopcornRenderer {
         ))
         ctx.stroke(rearRim, with: .color(PaletteUI.bagCream.opacity(0.35)), lineWidth: 1.2)
 
-        // Far heap (behind bag body partially — drawn before bag fill so they sit in mouth)
+        // Far heap (behind bag body partially - drawn before bag fill so they sit in mouth)
         for (index, piece) in HeapSeed.pieces.enumerated() where piece.far {
             let bob = heapBob(index: index, scene: scene)
             drawKernel(
@@ -579,7 +579,7 @@ public enum PopcornRenderer {
             shadow.translateBy(x: 0.7, y: 1.4)
             shadow.fill(silhouette, with: .color(.black.opacity(0.12)))
 
-            // 2. Base fill — near-white with warm underside falloff
+            // 2. Base fill - near-white with warm underside falloff
             layer.fill(
                 silhouette,
                 with: .linearGradient(
@@ -596,7 +596,7 @@ public enum PopcornRenderer {
                 detail.rotate(by: .radians(Double(rot)))
                 detail.scaleBy(x: r, y: r)
 
-                // Per-lobe radial volume shading (highlight only — shade comes from base gradient).
+                // Per-lobe radial volume shading (highlight only - shade comes from base gradient).
                 // Airborne kernels are small and moving; skip the per-lobe pass to hold frame budget.
                 if !airborne {
                     for (li, lobe) in lobes.enumerated() {
@@ -636,7 +636,7 @@ public enum PopcornRenderer {
                     )
                 }
 
-                // Hull remnant — drawn in unit space so gradient and speck rotate with the kernel.
+                // Hull remnant - drawn in unit space so gradient and speck rotate with the kernel.
                 let hullUnit = KernelShapeCache.hull[si]
                 let hullBox = KernelShapeCache.hullBox[si]
                 let hullCenter = CGPoint(x: hullBox.midX, y: hullBox.midY)

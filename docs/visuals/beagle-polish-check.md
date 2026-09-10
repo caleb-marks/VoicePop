@@ -1,4 +1,4 @@
-# Nandor voice-polish verification — 2026-09-09T22:11:06Z
+# Nandor voice-polish verification - 2026-09-09T22:11:06Z
 
 Production HUD remains Canvas-only. Beagle captures use the fixed 260×420 point scene at
 actual size and 4× review scale; the beagle path uses only dog geometry and restrained motion.
@@ -29,7 +29,7 @@ actual size and 4× review scale; the beagle path uses only dog geometry and res
 - `beagle-loud-reducemotion-light.png` / `beagle-loud-reducemotion-dark.png` (geometry must match quiet)
 - `beagle-transcribing-light.png` / `beagle-transcribing-dark.png` (capsule only)
 - `kernel-preview.png` (legacy popcorn route)
-- `beagle-polish.mp4`: 60 fps deterministic input demo — **not** microphone footage.
+- `beagle-polish.mp4`: 60 fps deterministic input demo - **not** microphone footage.
 
 ## Still required (live)
 

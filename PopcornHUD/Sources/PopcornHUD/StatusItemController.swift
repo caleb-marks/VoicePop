@@ -286,7 +286,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             targetApp = front.localizedName ?? ""
         }
         for (style, item) in globalStyleItems { item.state = prefs.global == style ? .on : .off }
-        appHeaderItem?.title = targetApp.isEmpty ? "This app:" : "This app — \(targetApp)"
+        appHeaderItem?.title = targetApp.isEmpty ? "This app:" : "This app - \(targetApp)"
         recordMenuItem?.title = lastState.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isEnabled = lastState.isHot
         let override = prefs.perApp.first { $0.key.caseInsensitiveCompare(targetApp) == .orderedSame }?.value
@@ -302,7 +302,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshFixLastItem()
         // Pick up hand edits to style.json for the *next* open, off the main thread.
         StylePrefsCache.refreshAsync()
-        statusItem?.button?.toolTip = "VoicePop — \(prefs.resolve(app: targetApp).rawValue.capitalized) · \(modelShortTitle)"
+        statusItem?.button?.toolTip = "VoicePop - \(prefs.resolve(app: targetApp).rawValue.capitalized) · \(modelShortTitle)"
     }
 
     /// Pure UI, no I/O: paints `modelMenuItem` / `modelItems` / `modelShortTitle` / the idle status

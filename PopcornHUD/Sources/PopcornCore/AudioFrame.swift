@@ -111,9 +111,9 @@ public struct AudioSnapshot: Equatable, Sendable {
 public enum AudioLevelFreshness: Equatable, Sendable {
     /// One or more frames arrived since the last consume.
     case fresh
-    /// Connected with levels available, but no new frame — reuse last fresh peak.
+    /// Connected with levels available, but no new frame - reuse last fresh peak.
     case held
-    /// Stale or disconnected — stop driving pops.
+    /// Stale or disconnected - stop driving pops.
     case unavailable
 }
 

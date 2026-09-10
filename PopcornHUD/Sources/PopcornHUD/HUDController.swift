@@ -234,7 +234,7 @@ final class HUDController {
             stopAnimation()
             return
         }
-        // Neutral dismiss — no success
+        // Neutral dismiss - no success
         presentation = .hidden
         opacity = 0
         scale = 0.90

@@ -149,7 +149,7 @@ public enum StylePrefsCache {
     private static var generation: UInt64 = 0
 
     /// Cached prefs. Reads the file synchronously only on the very first call, which is
-    /// `AppDelegate.applicationDidFinishLaunching` — at launch, not on any hot path.
+    /// `AppDelegate.applicationDidFinishLaunching` - at launch, not on any hot path.
     public static func current() -> StylePrefs {
         lock.lock()
         if let hit = cached {

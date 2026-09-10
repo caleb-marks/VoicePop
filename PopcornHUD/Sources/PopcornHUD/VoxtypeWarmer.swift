@@ -6,8 +6,8 @@ final class VoxtypeWarmer {
     private let queue = DispatchQueue(label: "com.caleb.voicepop.warm", qos: .utility)
     private var lastAttempt: Date?
 
-    /// Primes a cold Whisper engine after login. Never warms Parakeet — the
-    /// daemon already preloads it — and never starts a second process if the
+    /// Primes a cold Whisper engine after login. Never warms Parakeet - the
+    /// daemon already preloads it - and never starts a second process if the
     /// daemon pid is alive (state file is written only after model load).
     func ensureWarm() {
         queue.async { [self] in
