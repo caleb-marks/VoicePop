@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "entries": [
+    { "from": "voicepop", "to": "VoicePop", "count": 2, "lastTs": "2026-09-09T00:00:00Z" },
+    { "from": "voxtype", "to": "Voxtype", "count": 2, "lastTs": "2026-09-09T00:00:00Z" },
+    { "from": "ghostty", "to": "Ghostty", "count": 2, "lastTs": "2026-09-09T00:00:00Z" },
+    { "from": "cursor", "to": "Cursor", "count": 2, "lastTs": "2026-09-09T00:00:00Z" },
+    { "from": "parakeet", "to": "Parakeet", "count": 2, "lastTs": "2026-09-09T00:00:00Z" }
+  ]
+}

@@ -21,7 +21,7 @@ enum VoxtypeModel {
         model.hasPrefix("parakeet") ? "parakeet" : "whisper"
     }
 
-    static let nameGlossary = "VoicePop, Voxtype, Nandor, Ghostty, SkillBridge, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
+    static let nameGlossary = "VoicePop, Voxtype, Ghostty, SkillBridge, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
 
     static func title(for id: String) -> String {
         catalog.first { $0.id == id }?.title ?? id

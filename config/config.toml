@@ -4,7 +4,7 @@ state_file = "auto"
 engine = "parakeet"
 
 [parakeet]
-model = "parakeet-tdt-0.6b-v3"
+model = "parakeet-tdt-0.6b-v3-int8"
 
 [hotkey]
 enabled = true
@@ -31,7 +31,7 @@ flash_attention = true
 context_window_optimization = true
 on_demand_loading = true
 gpu_isolation = true
-initial_prompt = "VoicePop, Voxtype, Nandor, Ghostty, SkillBridge, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
+initial_prompt = "VoicePop, Voxtype, Ghostty, SkillBridge, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
 
 [output]
 mode = "type"

@@ -21,7 +21,7 @@ VoicePop is that. A menu-bar app wraps a local speech engine ([Voxtype](https://
 ## What it does
 
 - **Hold FN, talk, release.** Text lands in the focused app. Escape cancels.
-- **Local speech.** NVIDIA Parakeet (`parakeet-tdt-0.6b-v3`) by default, Whisper Tiny→Large-turbo as fallbacks. No network calls in the dictation path.
+- **Local speech.** NVIDIA Parakeet (`parakeet-tdt-0.6b-v3-int8`) by default, Whisper Tiny→Large-turbo as fallbacks. No network calls in the dictation path.
 - **HUD that reacts to you.** Kernel physics driven by real mic amplitude at 60 fps, then a `Transcribing…` capsule, then gone. Honors Reduce Motion.
 - **Writing style per app.** Automatic / Casual / Formal, with per-app overrides (Messages → Casual, Mail → Formal). Terminals are never restyled.
 - **Corrections that stick.** Fix the last thing typed, hit **Save & Learn**; the substitution applies from then on. Plain JSON on disk.
@@ -31,7 +31,7 @@ VoicePop is that. A menu-bar app wraps a local speech engine ([Voxtype](https://
 
 Apple Silicon, macOS 13+.
 
-1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) — `.dmg` (drag to Applications) or `-macos-arm64.zip` (`./install.sh`).
+1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) — `.dmg` (drag to Applications) or `-macos-arm64.zip` (`./install.sh`). First launch must run from Applications; if you open the DMG copy, VoicePop will move itself there.
 2. Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (~2.4 GB, once), and walks you through the two macOS switches it needs: **Accessibility** and **Input Monitoring** for Voxtype.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
@@ -83,7 +83,7 @@ State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl` (rot
 Build companion binaries **before** install (config points at `bin/voxtype-clean`):
 
 ```bash
-cd ~/VoicePop
+# from the repo root
 ./scripts/install-voxtype.sh
 ./scripts/uninstall-caps-remap.sh   # restore Caps Lock if remap was previously installed
 ./scripts/setup-launch-agents.sh    # packages VoicePop.app → /Applications

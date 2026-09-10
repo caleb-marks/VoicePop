@@ -23,7 +23,7 @@ if has_compiled_parakeet "$APP_BIN" && [[ "$FORCE" != "1" ]]; then
   echo "==> Custom Parakeet build already at $APP_BIN; skipping brew/app-bundle overwrite"
   echo "    (VOXTYPE_FORCE=1 to replace it)"
   echo "==> Models (Parakeet default; whisper small.en kept as fallback)"
-  "$APP_BIN" setup --download --model parakeet-tdt-0.6b-v3 || true
+  "$APP_BIN" setup --download --model parakeet-tdt-0.6b-v3-int8 || true
   "$APP_BIN" setup --download --model small.en || true
   if [[ ! -f "$HOME/.config/voxtype/config.toml" ]]; then
     mkdir -p "$HOME/.config/voxtype"
@@ -55,10 +55,13 @@ if [[ -z "${INSTALLED}" ]] || ! version_ge "$INSTALLED" "$MIN_VER"; then
   fi
   chmod +x "$BIN"
   xattr -dr com.apple.quarantine "$BIN" || true
-  rm -f /opt/homebrew/bin/voxtype
-  cp "$BIN" /opt/homebrew/bin/voxtype
-  chmod +x /opt/homebrew/bin/voxtype
-  xattr -dr com.apple.quarantine /opt/homebrew/bin/voxtype || true
+  PREFIX="$(brew --prefix 2>/dev/null || true)"
+  if [[ -n "$PREFIX" && -w "$PREFIX/bin" ]]; then
+    rm -f "$PREFIX/bin/voxtype"
+    cp "$BIN" "$PREFIX/bin/voxtype"
+    chmod +x "$PREFIX/bin/voxtype"
+    xattr -dr com.apple.quarantine "$PREFIX/bin/voxtype" || true
+  fi
 fi
 
 voxtype --version
@@ -76,7 +79,7 @@ if ! has_compiled_parakeet "$(command -v voxtype)"; then
 fi
 
 echo "==> Models (Parakeet default; whisper small.en kept as fallback)"
-voxtype setup --download --model parakeet-tdt-0.6b-v3 || true
+voxtype setup --download --model parakeet-tdt-0.6b-v3-int8 || true
 voxtype setup --download --model small.en || true
 
 echo "==> Install config"
