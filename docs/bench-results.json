@@ -1,0 +1,25 @@
+{
+  "results": {
+    "small.en": {
+      "n": 40,
+      "wer_mean": 0.13682539682539682,
+      "wer_median": 0.0,
+      "latency_median_s": 0.3169217919999996,
+      "latency_p95_s": 0.51368525
+    },
+    "large-v3-turbo": {
+      "n": 40,
+      "wer_mean": 0.051111111111111114,
+      "wer_median": 0.0,
+      "latency_median_s": 0.8272535415000011,
+      "latency_p95_s": 1.1346115839999982
+    }
+  },
+  "decision": {
+    "select": "small.en",
+    "reason": "retain baseline: turbo did not improve both speed and accuracy enough",
+    "speed_ratio_baseline_over_turbo_p95": 0.45274105891730504,
+    "wer_delta": -0.08571428571428572
+  },
+  "detail_path": "docs/bench-results.full.json"
+}

@@ -1,0 +1,65 @@
+state_file = "auto"
+
+# Local 1.0.1 rebuild with --features gpu-metal,parakeet,parakeet-coreml.
+engine = "parakeet"
+
+[parakeet]
+model = "parakeet-tdt-0.6b-v3"
+
+[hotkey]
+enabled = true
+key = "FN" # System Settings → Keyboard → Press 🌐 key to: Do Nothing
+mode = "push_to_talk"
+cancel_key = "ESC"
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 60
+pause_media = false
+duck_media = false
+
+[audio.feedback]
+enabled = true
+theme = "subtle"
+
+[whisper]
+model = "small.en"
+language = "en"
+translate = false
+flash_attention = true
+context_window_optimization = true
+on_demand_loading = true
+gpu_isolation = true
+initial_prompt = "VoicePop, Voxtype, Nandor, Ghostty, SkillBridge, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
+
+[output]
+mode = "type"
+fallback_to_clipboard = true
+type_delay_ms = 0
+pre_type_delay_ms = 0
+shift_enter_newlines = false
+
+[output.notification]
+on_recording_start = false
+on_recording_stop = false
+on_transcription = false
+
+[output.post_process]
+command = "__VOICEPOP_ROOT__/bin/voxtype-clean"
+timeout_ms = 5000
+
+[vad]
+enabled = true
+# auto → Energy VAD for parakeet, Whisper VAD for whisper (voxtype src/vad/mod.rs:55-68).
+# Forcing "whisper" here made every Parakeet dictation pay a Silero forward pass before the
+# daemon even wrote state=transcribing.
+backend = "auto"
+
+[text]
+spoken_punctuation = true
+smart_auto_submit = false
+
+# PopcornHUD replaces the built-in OSD. Never set frontend = "none".
+[osd]
+enabled = false

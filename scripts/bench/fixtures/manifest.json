@@ -1,0 +1,202 @@
+[
+  {
+    "id": "cmd_open",
+    "text": "Open the notes app",
+    "wav": "cmd_open.wav"
+  },
+  {
+    "id": "prose_short",
+    "text": "The quick brown fox jumps over the lazy dog",
+    "wav": "prose_short.wav"
+  },
+  {
+    "id": "name_proper",
+    "text": "Ada Lovelace is testing VoicePop",
+    "wav": "name_proper.wav"
+  },
+  {
+    "id": "numbers",
+    "text": "Meet me at three thirty five on February fourth",
+    "wav": "numbers.wav"
+  },
+  {
+    "id": "punct",
+    "text": "Hello, world. How are you?",
+    "wav": "punct.wav"
+  },
+  {
+    "id": "quietish",
+    "text": "this is a quieter phrase for testing",
+    "wav": "quietish.wav"
+  },
+  {
+    "id": "tech",
+    "text": "Push the commit to the VoicePop repository",
+    "wav": "tech.wav"
+  },
+  {
+    "id": "longish",
+    "text": "Today I am evaluating dictation accuracy and latency on an Apple Silicon Mac using Whisper models for local speech recognition",
+    "wav": "longish.wav"
+  },
+  {
+    "id": "cmd_open_8",
+    "text": "Open the notes app",
+    "wav": "cmd_open_8.wav"
+  },
+  {
+    "id": "prose_short_9",
+    "text": "The quick brown fox jumps over the lazy dog again",
+    "wav": "prose_short_9.wav"
+  },
+  {
+    "id": "name_proper_10",
+    "text": "Ada Lovelace is testing VoicePop",
+    "wav": "name_proper_10.wav"
+  },
+  {
+    "id": "numbers_11",
+    "text": "Meet me at three thirty five on February fourth again",
+    "wav": "numbers_11.wav"
+  },
+  {
+    "id": "punct_12",
+    "text": "Hello, world. How are you?",
+    "wav": "punct_12.wav"
+  },
+  {
+    "id": "quietish_13",
+    "text": "this is a quieter phrase for testing again",
+    "wav": "quietish_13.wav"
+  },
+  {
+    "id": "tech_14",
+    "text": "Push the commit to the VoicePop repository",
+    "wav": "tech_14.wav"
+  },
+  {
+    "id": "longish_15",
+    "text": "Today I am evaluating dictation accuracy and latency on an Apple Silicon Mac using Whisper models for local speech recognition again",
+    "wav": "longish_15.wav"
+  },
+  {
+    "id": "cmd_open_16",
+    "text": "Open the notes app",
+    "wav": "cmd_open_16.wav"
+  },
+  {
+    "id": "prose_short_17",
+    "text": "The quick brown fox jumps over the lazy dog again",
+    "wav": "prose_short_17.wav"
+  },
+  {
+    "id": "name_proper_18",
+    "text": "Ada Lovelace is testing VoicePop",
+    "wav": "name_proper_18.wav"
+  },
+  {
+    "id": "numbers_19",
+    "text": "Meet me at three thirty five on February fourth again",
+    "wav": "numbers_19.wav"
+  },
+  {
+    "id": "punct_20",
+    "text": "Hello, world. How are you?",
+    "wav": "punct_20.wav"
+  },
+  {
+    "id": "quietish_21",
+    "text": "this is a quieter phrase for testing again",
+    "wav": "quietish_21.wav"
+  },
+  {
+    "id": "tech_22",
+    "text": "Push the commit to the VoicePop repository",
+    "wav": "tech_22.wav"
+  },
+  {
+    "id": "longish_23",
+    "text": "Today I am evaluating dictation accuracy and latency on an Apple Silicon Mac using Whisper models for local speech recognition again",
+    "wav": "longish_23.wav"
+  },
+  {
+    "id": "cmd_open_24",
+    "text": "Open the notes app",
+    "wav": "cmd_open_24.wav"
+  },
+  {
+    "id": "prose_short_25",
+    "text": "The quick brown fox jumps over the lazy dog again",
+    "wav": "prose_short_25.wav"
+  },
+  {
+    "id": "name_proper_26",
+    "text": "Ada Lovelace is testing VoicePop",
+    "wav": "name_proper_26.wav"
+  },
+  {
+    "id": "numbers_27",
+    "text": "Meet me at three thirty five on February fourth again",
+    "wav": "numbers_27.wav"
+  },
+  {
+    "id": "punct_28",
+    "text": "Hello, world. How are you?",
+    "wav": "punct_28.wav"
+  },
+  {
+    "id": "quietish_29",
+    "text": "this is a quieter phrase for testing again",
+    "wav": "quietish_29.wav"
+  },
+  {
+    "id": "tech_30",
+    "text": "Push the commit to the VoicePop repository",
+    "wav": "tech_30.wav"
+  },
+  {
+    "id": "longish_31",
+    "text": "Today I am evaluating dictation accuracy and latency on an Apple Silicon Mac using Whisper models for local speech recognition again",
+    "wav": "longish_31.wav"
+  },
+  {
+    "id": "cmd_open_32",
+    "text": "Open the notes app",
+    "wav": "cmd_open_32.wav"
+  },
+  {
+    "id": "prose_short_33",
+    "text": "The quick brown fox jumps over the lazy dog again",
+    "wav": "prose_short_33.wav"
+  },
+  {
+    "id": "name_proper_34",
+    "text": "Ada Lovelace is testing VoicePop",
+    "wav": "name_proper_34.wav"
+  },
+  {
+    "id": "numbers_35",
+    "text": "Meet me at three thirty five on February fourth again",
+    "wav": "numbers_35.wav"
+  },
+  {
+    "id": "punct_36",
+    "text": "Hello, world. How are you?",
+    "wav": "punct_36.wav"
+  },
+  {
+    "id": "quietish_37",
+    "text": "this is a quieter phrase for testing again",
+    "wav": "quietish_37.wav"
+  },
+  {
+    "id": "tech_38",
+    "text": "Push the commit to the VoicePop repository",
+    "wav": "tech_38.wav"
+  },
+  {
+    "id": "longish_39",
+    "text": "Today I am evaluating dictation accuracy and latency on an Apple Silicon Mac using Whisper models for local speech recognition again",
+    "wav": "longish_39.wav"
+  }
+]
