@@ -43,7 +43,7 @@ Apple Silicon, macOS 13+.
 2. Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (~2.4 GB, once), and walks you through the two macOS switches it needs: **Accessibility** and **Input Monitoring** for Voxtype.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
-Signed with an Apple Development certificate, not notarized. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**, once.
+Ad-hoc signed, not notarized. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**, once.
 
 ## How it works
 

@@ -59,15 +59,22 @@ iconutil -c icns -o "$CONTENTS/Resources/AppIcon.icns" "$ICONSET"
 
 echo "==> Codesign"
 xattr -cr "$APP" 2>/dev/null || true
-IDENTITIES="$(security find-identity -v -p codesigning || true)"
-if [[ -z "$SIGN_ID" ]]; then
-  SIGN_ID="$(printf '%s\n' "$IDENTITIES" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
-fi
-if [[ -n "$SIGN_ID" ]] && printf '%s\n' "$IDENTITIES" | grep -Fq "$SIGN_ID"; then
+# Ad-hoc by default. An Apple Development certificate embeds the Apple ID email in its common
+# name, which then ships inside every published binary, so never auto-select one. Set
+# VOICEPOP_SIGN_IDENTITY to a Developer ID identity to sign for distribution.
+if [[ -n "$SIGN_ID" && "$SIGN_ID" != "-" ]]; then
+  IDENTITIES="$(security find-identity -v -p codesigning || true)"
+  if ! printf '%s\n' "$IDENTITIES" | grep -Fq "$SIGN_ID"; then
+    echo "ERROR: signing identity not found in keychain: $SIGN_ID" >&2
+    exit 1
+  fi
+  if [[ "$SIGN_ID" == Apple\ Development:* ]]; then
+    echo "ERROR: refusing to sign a release with an Apple Development identity (embeds the Apple ID email). Use a Developer ID identity or leave VOICEPOP_SIGN_IDENTITY unset for ad-hoc." >&2
+    exit 1
+  fi
   codesign --force --deep --timestamp --sign "$SIGN_ID" "$APP"
 else
-  echo "WARN: signing identity not found: $SIGN_ID" >&2
-  echo "WARN: falling back to ad-hoc. Set VOICEPOP_SIGN_IDENTITY to a valid codesign identity." >&2
+  echo "==> Ad-hoc signature (set VOICEPOP_SIGN_IDENTITY to a Developer ID identity to sign for distribution)"
   codesign --force --deep --sign - "$APP"
 fi
 
