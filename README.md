@@ -8,6 +8,18 @@ Built with AI pair-programming (Claude Code, Codex). Architecture, product decis
 
 <p align="center"><img src="docs/visuals/popcorn-loud-light.png" width="260" alt="VoicePop popcorn HUD while recording"></p>
 
+## Install (download)
+
+Apple Silicon, macOS 13+. Grab the latest `VoicePop-<version>-macos-arm64.zip` from [Releases](https://github.com/caleb-marks/VoicePop/releases), unzip, then:
+
+```bash
+cd ~/Downloads/VoicePop-*-macos-arm64 && ./install.sh
+```
+
+The installer sets up the Voxtype speech engine (bundled Parakeet-capable build), downloads the Parakeet model (about 2.4 GB, once), writes `~/.config/voxtype/config.toml` if you have none, and installs `/Applications/VoicePop.app`. Afterwards grant **Accessibility**, **Input Monitoring**, and **Microphone** to Voxtype in System Settings, and set **Keyboard → Press 🌐 key to: Do Nothing**.
+
+The app is signed but not notarized. If macOS blocks it, right-click → Open once, or re-run `install.sh` (it clears quarantine). Building from source is under [One-time / after upgrade](#one-time--after-upgrade); `scripts/make-release.sh` produces the zip.
+
 ## Daily use
 
 Hold **FN** (🌐) to record; release to type. Escape cancels.
