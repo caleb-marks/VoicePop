@@ -1,6 +1,6 @@
 <h1 align="center">VoicePop</h1>
 
-<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release — the text types itself into whatever app you were in.<br>Speech never leaves the machine.</p>
+<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release — the text types itself into whatever app you were in.<br>Speech never leaves the machine.<br>A free, open-source alternative to Wispr Flow and Superwhisper. No subscription, no account, no audio leaves the machine.</p>
 
 <p align="center">
   <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-000?logo=apple&logoColor=white">
