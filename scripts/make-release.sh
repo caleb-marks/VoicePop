@@ -28,7 +28,7 @@ cp "$ROOT/release/install.sh" "$ROOT/release/README.txt" "$STAGE/"
 chmod +x "$STAGE/install.sh" "$STAGE/voxtype-bin"
 
 codesign --verify --deep --strict "$STAGE/VoicePop.app"
-ditto -c -k --keepParent "$STAGE" "$ZIP"
+ditto -c -k --norsrc --keepParent "$STAGE" "$ZIP"
 rm -rf "$STAGE"
 
 DMG_ROOT="$ROOT/dist/dmg-root"
