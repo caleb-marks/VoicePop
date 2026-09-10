@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        SetupAssistant.runIfNeeded { [self] in startServices() }
+    }
+
+    private func startServices() {
         LoginItem.registerIfNeeded()
         let prefs = StylePrefsCache.current()
         if OllamaWarmer.formalInEffect(prefs) { OllamaWarmer.shared.ensureWarm(prefs.llm) }

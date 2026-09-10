@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the downloadable release zip: dist/VoicePop-<version>-macos-arm64.zip
-# Contents: VoicePop.app, Parakeet-capable voxtype-bin, install.sh, README.txt
+# Build the downloadable release: dist/VoicePop-<version>.dmg (drag to Applications; the app
+# sets itself up on first launch) plus dist/VoicePop-<version>-macos-arm64.zip (Terminal installer).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,5 +31,15 @@ codesign --verify --deep --strict "$STAGE/VoicePop.app"
 ditto -c -k --keepParent "$STAGE" "$ZIP"
 rm -rf "$STAGE"
 
+DMG_ROOT="$ROOT/dist/dmg-root"
+DMG="$ROOT/dist/VoicePop-${VERSION}.dmg"
+rm -rf "$DMG_ROOT" "$DMG"
+mkdir -p "$DMG_ROOT"
+cp -R "$ROOT/dist/VoicePop.app" "$DMG_ROOT/VoicePop.app"
+ln -s /Applications "$DMG_ROOT/Applications"
+hdiutil create -quiet -volname "VoicePop" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG"
+rm -rf "$DMG_ROOT"
+
+echo "$DMG"
 echo "$ZIP"
-shasum -a 256 "$ZIP"
+shasum -a 256 "$DMG" "$ZIP"
