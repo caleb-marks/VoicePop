@@ -10,7 +10,7 @@
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-<p align="center"><img src="docs/visuals/demo.gif" width="240" alt="VoicePop HUD reacting to speech, then collapsing to a Transcribing capsule"></p>
+<p align="center"><img src="docs/visuals/demo-tub.gif" width="240" alt="VoicePop HUD reacting to speech, then collapsing to a Transcribing capsule"></p>
 
 ## Why
 
