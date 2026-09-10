@@ -116,7 +116,7 @@ Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is d
 
 ## Docs
 
-[SPEC.md](SPEC.md) - original Mac port · [SPEC-v3.md](SPEC-v3.md) - realistic popcorn + responsive dictation · [NOTES.md](NOTES.md) - discoveries and definition of done · [docs/metrics.md](docs/metrics.md) - benchmarks
+[docs/metrics.md](docs/metrics.md) — benchmarks. Internal port notes and specs live in [docs/archive/](docs/archive/).
 
 ## Credits
 

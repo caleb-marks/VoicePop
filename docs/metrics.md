@@ -1,6 +1,6 @@
 # VoicePop metrics
 
-> **Current default (since 2026-09-07):** NVIDIA Parakeet `parakeet-tdt-0.6b-v3` on a local Voxtype 1.0.1 rebuild with `gpu-metal,parakeet,parakeet-coreml`. The baseline below predates that rebuild, so its "Blocked" Parakeet row and the `small.en` decision are historical. Whisper `small.en` stays installed as the menu fallback.
+> **Current default (since 2026-09-09):** NVIDIA Parakeet `parakeet-tdt-0.6b-v3-int8` on a local Voxtype 1.0.1 rebuild with `gpu-metal,parakeet,parakeet-coreml`. The baseline below predates that rebuild, so its "Blocked" Parakeet row and the `small.en` decision are historical. Whisper `small.en` stays installed as the menu fallback.
 
 ## Baseline (2026-09-06)
 
