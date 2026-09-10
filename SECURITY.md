@@ -32,6 +32,6 @@ Only the latest release gets fixes.
 
 ## Reporting a vulnerability
 
-Use GitHub private vulnerability reporting (Security tab, Report a vulnerability). Please include the version, macOS version, and steps to reproduce. Do not open a public issue for anything that could be used against other users before there is a fix.
+Use GitHub's private reporting: open the repo's **Security** tab and click **Report a vulnerability** (direct link: https://github.com/caleb-marks/VoicePop/security/advisories/new). Please include the version, macOS version, and steps to reproduce. Do not open a public issue for anything that could be used against other users before there is a fix.
 
 Expect an acknowledgement within a week. This is a solo side project, not a funded product — there is no bounty.
