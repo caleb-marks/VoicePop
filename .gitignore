@@ -13,6 +13,5 @@ docs/execution-spec/
 docs/visuals/nandor-beagle/
 *-review4x.png
 *.mp4
-config/replacements-seed.json
 /--help/
 *.app/

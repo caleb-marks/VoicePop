@@ -10,7 +10,7 @@ APP_DST="/Applications/VoicePop.app"
 VOX_SRC="$HERE/voxtype-bin"
 VOX_APP_BIN="/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"
 CFG="$HOME/.config/voxtype/config.toml"
-MODEL="parakeet-tdt-0.6b-v3"
+MODEL="parakeet-tdt-0.6b-v3-int8"
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }

@@ -448,10 +448,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
            FileManager.default.isExecutableFile(atPath: custom) {
             return custom
         }
-        let fallback = NSHomeDirectory() + "/VoicePop/scripts/restart-voxtype.sh"
-        if FileManager.default.isExecutableFile(atPath: fallback) {
-            return fallback
-        }
         return nil
     }
 
