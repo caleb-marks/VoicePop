@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: PopcornHUD/.build
+          key: ${{ runner.os }}-spm-${{ hashFiles('PopcornHUD/Package.resolved', 'PopcornHUD/Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build --package-path PopcornHUD
+
+      - name: Test
+        run: swift test --package-path PopcornHUD

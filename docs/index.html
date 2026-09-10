@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoicePop — push-to-talk dictation for macOS</title>
+<meta name="description" content="Hold FN, speak, release — the text types itself. Local speech on your Mac. Free, open source, no subscription.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>">
+<meta property="og:title" content="VoicePop — push-to-talk dictation for macOS">
+<meta property="og:description" content="Hold FN, speak, release. Local speech on your Mac. No subscription, no account.">
+<meta property="og:type" content="website">
+<style>
+:root{
+  --bg:#fbf9f6; --surface:#fff; --line:#e7e1d8; --ink:#1c1a17; --muted:#6b6459;
+  --accent:#c2410c; --accent-ink:#fff; --code-bg:#f3efe9;
+  --radius:14px; --maxw:940px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#131211; --surface:#1c1a18; --line:#2e2a26; --ink:#f0ece6; --muted:#a09789;
+    --accent:#fb923c; --accent-ink:#1c1006; --code-bg:#221f1c;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+a{color:var(--accent)}
+img{max-width:100%; height:auto}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em}
+code{background:var(--code-bg); padding:.14em .4em; border-radius:5px}
+kbd{
+  background:var(--surface); border:1px solid var(--line); border-bottom-width:2px;
+  border-radius:6px; padding:.1em .45em; font-size:.85em; white-space:nowrap;
+}
+
+/* hero */
+header{padding:64px 0 44px; text-align:center}
+h1{
+  margin:0 0 6px; font-size:clamp(2.6rem,8vw,4rem); letter-spacing:-.03em; line-height:1;
+  font-weight:700;
+}
+.tag{margin:0 auto; max-width:38ch; font-size:clamp(1.05rem,2.6vw,1.2rem); color:var(--muted)}
+.tag b{color:var(--ink); font-weight:600}
+.hero-gif{margin:30px auto 0; width:230px; display:block; border-radius:var(--radius)}
+.cta{margin:30px 0 10px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap}
+.btn{
+  display:inline-block; padding:12px 24px; border-radius:999px; font-weight:600;
+  text-decoration:none; border:1px solid transparent; font-size:1rem;
+}
+.btn-primary{background:var(--accent); color:var(--accent-ink)}
+.btn-secondary{background:transparent; color:var(--ink); border-color:var(--line)}
+.req{margin:6px 0 0; font-size:.86rem; color:var(--muted)}
+.badges{margin:22px 0 0; display:flex; gap:8px; justify-content:center; flex-wrap:wrap}
+.badge{
+  font-size:.74rem; letter-spacing:.03em; text-transform:uppercase; font-weight:600;
+  color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:4px 11px;
+}
+
+/* sections */
+section{padding:44px 0; border-top:1px solid var(--line)}
+h2{margin:0 0 20px; font-size:1.35rem; letter-spacing:-.015em}
+h2 .n{color:var(--muted); font-weight:400; margin-right:.5em; font-size:.85em}
+p{margin:0 0 14px}
+.lede{color:var(--muted); max-width:62ch}
+
+/* features */
+.grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:17px 18px}
+.card h3{margin:0 0 6px; font-size:1rem}
+.card p{margin:0; color:var(--muted); font-size:.93rem}
+
+/* shots */
+.shots{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); align-items:end}
+.shot{text-align:center}
+.shot img{border-radius:10px; border:1px solid var(--line)}
+.shot figcaption{margin-top:7px; font-size:.8rem; color:var(--muted)}
+figure{margin:0}
+
+/* steps */
+ol.steps{margin:0; padding-left:1.3em}
+ol.steps li{margin-bottom:10px}
+
+/* diagram */
+.diagram{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; overflow-x:auto;
+}
+.diagram pre{margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.76rem; line-height:1.45; white-space:pre}
+
+/* note */
+.note{
+  background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent);
+  border-radius:0 10px 10px 0; padding:13px 16px; font-size:.92rem; color:var(--muted);
+}
+.note b{color:var(--ink)}
+
+footer{
+  border-top:1px solid var(--line); padding:30px 0 46px;
+  font-size:.87rem; color:var(--muted); text-align:center;
+}
+footer p{margin:0 0 7px}
+@media (max-width:520px){
+  header{padding:44px 0 32px}
+  section{padding:34px 0}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>VoicePop</h1>
+    <p class="tag">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release — the text types itself into whatever app you were in.</p>
+    <img class="hero-gif" src="visuals/demo-tub.gif" alt="The VoicePop HUD reacting to speech, then collapsing to a Transcribing capsule" width="230">
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/caleb-marks/VoicePop/releases/latest">Download for macOS</a>
+      <a class="btn btn-secondary" href="https://github.com/caleb-marks/VoicePop">View on GitHub</a>
+    </div>
+    <p class="req">Apple Silicon · macOS 13+ · free and open source</p>
+    <div class="badges">
+      <span class="badge">0 cloud calls</span>
+      <span class="badge">No subscription</span>
+      <span class="badge">No account</span>
+      <span class="badge">MIT licensed</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">01</span>Why it exists</h2>
+    <p class="lede">Built-in macOS dictation is cloud-backed, punctuates badly, and gives no honest signal that it is listening. VoicePop does three things Apple's version does not do together: <b>stay on the device</b>, <b>start typing in under a second</b>, and <b>look like it is listening</b> so you are not talking into a void.</p>
+    <p class="lede">It is a menu-bar app wrapping a local speech engine (<a href="https://voxtype.io">Voxtype</a>, MIT, by peteonrails) plus the parts that make dictation usable day to day: a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">02</span>What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Hold FN, talk, release</h3>
+        <p>Text lands in the focused app. <kbd>Esc</kbd> cancels.</p>
+      </div>
+      <div class="card">
+        <h3>Local speech</h3>
+        <p>NVIDIA Parakeet <code>tdt-0.6b-v3-int8</code> by default, Whisper Tiny through Large-turbo as fallbacks. No network calls in the dictation path.</p>
+      </div>
+      <div class="card">
+        <h3>A HUD that reacts to you</h3>
+        <p>Kernel physics driven by real mic amplitude at 60 fps, then a Transcribing capsule, then gone. Honors Reduce Motion.</p>
+      </div>
+      <div class="card">
+        <h3>Writing style per app</h3>
+        <p>Automatic, Casual, or Formal, with per-app overrides — Messages to Casual, Mail to Formal. Terminals are never restyled.</p>
+      </div>
+      <div class="card">
+        <h3>Corrections that stick</h3>
+        <p>Fix the last thing typed, hit Save &amp; Learn, and the substitution applies from then on. Plain JSON on disk.</p>
+      </div>
+      <div class="card">
+        <h3>Optional on-device polish</h3>
+        <p>Formal style can run through a local LLM (<code>qwen3.5:4b-mlx</code> via Ollama). If it is slow or down, rules output ships unchanged inside a 5 s budget.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">03</span>It shows you it is listening</h2>
+    <p class="lede">The same scene at four microphone levels. Kernel count and motion follow your actual voice, not a canned animation.</p>
+    <div class="shots">
+      <figure class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="visuals/popcorn-quiet-dark.png">
+          <img src="visuals/popcorn-quiet-light.png" alt="HUD at a quiet speaking level, few kernels" width="150">
+        </picture>
+        <figcaption>Quiet</figcaption>
+      </figure>
+      <figure class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="visuals/popcorn-normal-dark.png">
+          <img src="visuals/popcorn-normal-light.png" alt="HUD at a normal speaking level" width="150">
+        </picture>
+        <figcaption>Normal</figcaption>
+      </figure>
+      <figure class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="visuals/popcorn-loud-dark.png">
+          <img src="visuals/popcorn-loud-light.png" alt="HUD at a loud speaking level, kernels filling the frame" width="150">
+        </picture>
+        <figcaption>Loud</figcaption>
+      </figure>
+      <figure class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="visuals/popcorn-silence-dark.png">
+          <img src="visuals/popcorn-silence-light.png" alt="HUD settling during silence" width="150">
+        </picture>
+        <figcaption>Silence</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">04</span>Install</h2>
+    <ol class="steps">
+      <li>Download the latest <code>.dmg</code> from <a href="https://github.com/caleb-marks/VoicePop/releases/latest">Releases</a>, open it, and drag <b>VoicePop</b> onto <b>Applications</b>.</li>
+      <li>Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (about 2.4&nbsp;GB, once), and walks you through the two macOS switches it needs: <b>Accessibility</b> and <b>Input Monitoring</b> for Voxtype.</li>
+      <li>Set <b>System Settings → Keyboard → Press 🌐 key to: Do Nothing</b> so Globe does not steal the key.</li>
+    </ol>
+    <p></p>
+    <div class="note"><b>Not notarized.</b> VoicePop is signed with an Apple Development certificate. If macOS says it cannot verify the app, open <b>System Settings → Privacy &amp; Security</b>, scroll down, and click <b>Open Anyway</b> once.</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">05</span>How it works</h2>
+    <div class="diagram">
+<pre>FN keypress ──► Voxtype daemon ──► ASR (Parakeet / Whisper, Metal)
+                    │                      │
+              mic amplitude           raw transcript
+              (unix socket)                │
+                    ▼                      ▼
+             PopcornHUD (SwiftUI)   voxtype-clean ──► style rules ──► learned
+              60 fps kernel sim      (post-process)   (per-app)      replacements
+                    │                                                    │
+                    └────────────► "Transcribing…" ◄─────────────────────┘
+                                          │
+                              Voxtype types it ──► focused app</pre>
+    </div>
+    <p style="margin-top:16px" class="lede">Swift packages: <code>PopcornCore</code> (audio framing, physics, text clean, style, corrections — the tested part), <code>PopcornArt</code> (renderers), <code>PopcornHUD</code> (menu bar, windows, watchers), and <code>VoxtypeClean</code> (the post-processor Voxtype shells out to).</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">06</span>What it keeps, and where</h2>
+    <p class="lede">State is plain JSON in <code>~/.config/voicepop/</code> — <code>style.json</code>, <code>history.jsonl</code> (rotates at 1&nbsp;MiB, delete to clear), <code>corrections.jsonl</code>, and <code>replacements.json</code>. Nothing is transmitted. Details in <a href="https://github.com/caleb-marks/VoicePop/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Speech engine: <a href="https://voxtype.io">Voxtype</a> by peteonrails (MIT). ASR models: NVIDIA Parakeet, OpenAI Whisper.</p>
+    <p>VoicePop is MIT licensed. <a href="https://github.com/caleb-marks/VoicePop">Source on GitHub</a> · <a href="https://github.com/caleb-marks/VoicePop/blob/main/CONTRIBUTING.md">Contributing</a> · <a href="https://github.com/caleb-marks/VoicePop/issues">Report an issue</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

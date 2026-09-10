@@ -1,7 +1,7 @@
 # Popcorn voice-polish verification - 2026-09-10T04:27:17Z
 
-Production HUD remains Canvas-only. Beagle captures use the fixed 260×420 point scene at
-actual size and 4× review scale; the beagle path uses only dog geometry and restrained motion.
+Production HUD remains Canvas-only. Popcorn captures use the fixed 260×420 point scene at
+actual size and 4× review scale; the popcorn path uses only tub and kernel geometry and restrained motion.
 
 ## Checks
 
