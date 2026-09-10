@@ -16,8 +16,12 @@ public enum Tunables {
     public static let baseHalf: CGFloat = 44
     public static let baseCorner: CGFloat = 9
     public static let sidePinch: CGFloat = 3
-    public static let toothCount = 10
-    public static let toothH: CGFloat = 5
+    /// Vertical radius of the tub's rim ellipse (front lip dips `rimRy` below `bagTop`).
+    public static let rimRy: CGFloat = 13
+    /// How far the rolled rim overhangs the tub wall.
+    public static let rimOverhang: CGFloat = 3.5
+    /// Thickness of the rim band measured inward from the wall.
+    public static let rimBand: CGFloat = 6
     public static let stripeCount = 9
     public static let capsuleW: CGFloat = 150
     public static let capsuleH: CGFloat = 28
