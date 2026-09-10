@@ -1,0 +1,81 @@
+name: Bug report
+description: Something in VoicePop does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        VoicePop runs entirely on your Mac. Please do not paste transcript text you would not want public.
+
+  - type: input
+    id: version
+    attributes:
+      label: VoicePop version
+      description: Menu bar → About, or the version of the release you downloaded.
+      placeholder: "1.1.2"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware
+      options:
+        - Apple Silicon (M1/M2/M3/M4)
+        - Intel
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Dictation model
+      options:
+        - Parakeet (default)
+        - Whisper small.en
+        - Whisper large-v3-turbo
+        - Other Whisper size
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Hold FN
+        2. Say "..."
+        3. Release
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permissions check
+      description: Voxtype.app (not Terminal, not VoicePop) needs Accessibility, Input Monitoring, and Microphone. Confirm which are granted.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Timing output (optional)
+      description: |
+        Quit VoicePop, then run:
+        POPCORNHUD_TIMING=1 /Applications/VoicePop.app/Contents/MacOS/VoicePop
+      render: shell

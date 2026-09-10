@@ -1,8 +1,9 @@
 <h1 align="center">VoicePop</h1>
 
-<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release - the text types itself into whatever app you were in.<br>Speech never leaves the machine.<br>A free, open-source alternative to Wispr Flow and Superwhisper. No subscription, no account, no audio leaves the machine.</p>
+<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release - the text types itself into whatever app you were in.<br>Speech never leaves the machine.<br>A free, open-source alternative to Wispr Flow and Superwhisper. No subscription, no account.</p>
 
 <p align="center">
+  <a href="https://github.com/caleb-marks/VoicePop/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/caleb-marks/VoicePop/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-000?logo=apple&logoColor=white">
   <img alt="Swift 5.9" src="https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white">
   <img alt="Local only" src="https://img.shields.io/badge/cloud%20calls-0-2ea44f">
@@ -26,6 +27,13 @@ VoicePop is that. A menu-bar app wraps a local speech engine ([Voxtype](https://
 - **Writing style per app.** Automatic / Casual / Formal, with per-app overrides (Messages → Casual, Mail → Formal). Terminals are never restyled.
 - **Corrections that stick.** Fix the last thing typed, hit **Save & Learn**; the substitution applies from then on. Plain JSON on disk.
 - **Optional on-device polish.** Formal style can run through a local LLM (`qwen3.5:4b-mlx` via Ollama). If it is slow or down, rules output ships unchanged inside a 5 s budget.
+
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/visuals/popcorn-quiet-dark.png"><img src="docs/visuals/popcorn-quiet-light.png" width="150" alt="HUD at a quiet speaking level - few kernels"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/visuals/popcorn-normal-dark.png"><img src="docs/visuals/popcorn-normal-light.png" width="150" alt="HUD at a normal speaking level"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/visuals/popcorn-loud-dark.png"><img src="docs/visuals/popcorn-loud-light.png" width="150" alt="HUD at a loud speaking level - kernels filling the frame"></picture>
+</p>
+<p align="center"><sub>Quiet, normal, loud - the same scene at three mic amplitudes. Dark-mode and Reduce Motion stills are in <a href="docs/visuals/">docs/visuals/</a>.</sub></p>
 
 ## Install
 
@@ -57,15 +65,17 @@ Swift packages: `PopcornCore` (audio framing, physics, text clean, style, correc
 
 ## Engineering notes
 
-**Model choice was measured, not guessed.** 40 TTS fixtures, CLI transcribe, WER + latency:
+**Model choice was measured, not guessed.** The default today is Parakeet `tdt-0.6b-v3-int8`. It got there because of the bench below, not in spite of it.
+
+The original run - 40 TTS fixtures, CLI transcribe, WER + latency - could only compare the two Whisper sizes the official macOS build shipped:
 
 | Model | WER (mean) | Latency p95 | Verdict |
 |---|---|---|---|
-| Whisper `small.en` | 0.137 | 0.51 s | shipped as baseline default |
+| Whisper `small.en` | 0.137 | 0.51 s | shipped as the original default |
 | Whisper `large-v3-turbo` | 0.051 | 1.13 s | 2.2× slower p95 - rejected for a push-to-talk loop |
-| Parakeet `tdt-0.6b-v3` | - | - | blocked: not compiled into upstream macOS build |
+| Parakeet `tdt-0.6b-v3` | not measurable | not measurable | not compiled into the upstream macOS build |
 
-Better accuracy was not worth doubling the tail latency on a key you hold down. That "blocked" row is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled - Parakeet is now the default, and the official Whisper-only binary is kept for one-command rollback.
+Better accuracy was not worth doubling the tail latency on a key you hold down. And that third row - a model that could not be benched at all because the binary did not include it - is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled. Parakeet became the default once it was runnable; the official Whisper-only binary is kept for one-command rollback. Re-benching Parakeet on the same 40 fixtures is still open - see [docs/metrics.md](docs/metrics.md).
 
 Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests (57 tests: audio framing, text clean, physics bounds, kernel recycling), timing instrumentation behind `POPCORNHUD_TIMING=1`, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
 
@@ -116,7 +126,17 @@ Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is d
 
 ## Docs
 
-[docs/metrics.md](docs/metrics.md) — benchmarks. Internal port notes and specs live in [docs/archive/](docs/archive/).
+[docs/metrics.md](docs/metrics.md) — benchmarks. [SECURITY.md](SECURITY.md) — what runs locally, what touches the network, and what is stored on disk. Internal port notes and specs live in [docs/archive/](docs/archive/).
+
+## Contributing
+
+Issues and pull requests are welcome. Build and test with:
+
+```bash
+swift test --package-path PopcornHUD   # 57 tests
+```
+
+`PopcornCore` is the tested target - put logic there. Full guidance in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 

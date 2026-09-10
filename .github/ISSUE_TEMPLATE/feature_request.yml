@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest something VoicePop should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is awkward today?
+      description: Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like instead?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: local
+    attributes:
+      label: Constraint
+      options:
+        - label: This can work without sending audio or text off the machine.

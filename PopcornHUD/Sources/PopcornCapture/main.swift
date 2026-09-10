@@ -138,8 +138,8 @@ struct PopcornCapture {
         let report = """
         # \(mascot == .beagle ? "Nandor" : "Popcorn") voice-polish verification - \(ISO8601DateFormatter().string(from: Date()))
 
-        Production HUD remains Canvas-only. Beagle captures use the fixed 260×420 point scene at
-        actual size and 4× review scale; the beagle path uses only dog geometry and restrained motion.
+        Production HUD remains Canvas-only. \(mascot == .beagle ? "Beagle" : "Popcorn") captures use the
+        fixed 260×420 point scene at actual size and 4× review scale; the \(mascot == .beagle ? "beagle path uses only dog geometry" : "popcorn path uses only tub and kernel geometry") and restrained motion.
 
         ## Checks
 
