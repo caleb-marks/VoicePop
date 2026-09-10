@@ -126,7 +126,7 @@ Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is d
 
 ## Docs
 
-[docs/metrics.md](docs/metrics.md) — benchmarks. [SECURITY.md](SECURITY.md) — what runs locally, what touches the network, and what is stored on disk. Internal port notes and specs live in [docs/archive/](docs/archive/).
+[docs/metrics.md](docs/metrics.md) — benchmarks. [SECURITY.md](SECURITY.md) — what runs locally, what touches the network, and what is stored on disk.
 
 ## Contributing
 
