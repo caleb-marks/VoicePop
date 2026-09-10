@@ -1,49 +1,84 @@
-# VoicePop (macOS)
+<h1 align="center">VoicePop</h1>
 
-FN push-to-talk dictation via upstream Voxtype + VoicePop.app (popcorn HUD). Local only.
+<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release — the text types itself into whatever app you were in.<br>Speech never leaves the machine.</p>
 
-Built on [Voxtype](https://voxtype.io) by peteonrails for the speech engine; this repo adds the macOS menu-bar HUD, style rules, learned corrections, and install scripts. MIT licensed (see `LICENSE`).
+<p align="center">
+  <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-000?logo=apple&logoColor=white">
+  <img alt="Swift 5.9" src="https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white">
+  <img alt="Local only" src="https://img.shields.io/badge/cloud%20calls-0-2ea44f">
+  <a href="https://github.com/caleb-marks/VoicePop/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/caleb-marks/VoicePop"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+</p>
 
-Built with AI pair-programming (Claude Code, Codex). Architecture, product decisions, review, and macOS integration are mine.
+<p align="center"><img src="docs/visuals/demo.gif" width="240" alt="VoicePop HUD reacting to speech, then collapsing to a Transcribing capsule"></p>
 
-<p align="center"><img src="docs/visuals/popcorn-loud-light.png" width="260" alt="VoicePop popcorn HUD while recording"></p>
+## Why
 
-## Install (download)
+Built-in macOS dictation is cloud-backed, punctuates badly, and gives no honest signal that it is listening. I dictate a lot — notes, messages, commit messages — and wanted three things Apple's version does not do together: **stay on the device**, **start typing in under a second**, and **look like it is listening** so I am not talking into a void.
+
+VoicePop is that. A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, by peteonrails) and adds the parts that make dictation usable day to day: a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.
+
+## What it does
+
+- **Hold FN, talk, release.** Text lands in the focused app. Escape cancels.
+- **Local speech.** NVIDIA Parakeet (`parakeet-tdt-0.6b-v3`) by default, Whisper Tiny→Large-turbo as fallbacks. No network calls in the dictation path.
+- **HUD that reacts to you.** Kernel physics driven by real mic amplitude at 60 fps, then a `Transcribing…` capsule, then gone. Honors Reduce Motion.
+- **Writing style per app.** Automatic / Casual / Formal, with per-app overrides (Messages → Casual, Mail → Formal). Terminals are never restyled.
+- **Corrections that stick.** Fix the last thing typed, hit **Save & Learn**; the substitution applies from then on. Plain JSON on disk.
+- **Optional on-device polish.** Formal style can run through a local LLM (`qwen3.5:4b-mlx` via Ollama). If it is slow or down, rules output ships unchanged inside a 5 s budget.
+
+## Install
 
 Apple Silicon, macOS 13+.
 
-1. Download `VoicePop-<version>.dmg` from [Releases](https://github.com/caleb-marks/VoicePop/releases).
-2. Open it and drag **VoicePop** onto **Applications**.
-3. Open VoicePop. On first launch it installs the Voxtype speech engine, downloads the Parakeet model (about 2.4 GB, once), writes its settings, and starts dictation. It then walks you to the two switches macOS requires: **Accessibility** and **Input Monitoring** for Voxtype, and **Keyboard → Press 🌐 key to: Do Nothing**.
+1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) — `.dmg` (drag to Applications) or `-macos-arm64.zip` (`./install.sh`).
+2. Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (~2.4 GB, once), and walks you through the two macOS switches it needs: **Accessibility** and **Input Monitoring** for Voxtype.
+3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
-The app is signed with a developer certificate but not notarized. If macOS says it cannot verify the app, go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** once.
+Signed with an Apple Development certificate, not notarized. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**, once.
 
-Prefer Terminal? The `-macos-arm64.zip` asset has the same app plus an `install.sh`. Building from source is under [One-time / after upgrade](#one-time--after-upgrade); `scripts/make-release.sh` produces both artifacts.
+## How it works
+
+```
+FN keypress ──► Voxtype daemon ──► ASR (Parakeet / Whisper, Metal)
+                    │                      │
+              mic amplitude           raw transcript
+              (unix socket)                │
+                    ▼                      ▼
+             PopcornHUD (SwiftUI)   voxtype-clean ──► style rules ──► learned
+              60 fps kernel sim      (post-process)   (per-app)      replacements
+                    │                                                    │
+                    └────────────► "Transcribing…" ◄─────────────────────┘
+                                          │
+                              Voxtype types it ──► focused app
+```
+
+Swift packages: `PopcornCore` (audio framing, physics, text clean, style, corrections — the tested part), `PopcornArt` (renderers), `PopcornHUD` (menu bar, windows, watchers), `VoxtypeClean` (the post-processor Voxtype shells out to).
+
+## Engineering notes
+
+**Model choice was measured, not guessed.** 40 TTS fixtures, CLI transcribe, WER + latency:
+
+| Model | WER (mean) | Latency p95 | Verdict |
+|---|---|---|---|
+| Whisper `small.en` | 0.137 | 0.51 s | shipped as baseline default |
+| Whisper `large-v3-turbo` | 0.051 | 1.13 s | 2.2× slower p95 — rejected for a push-to-talk loop |
+| Parakeet `tdt-0.6b-v3` | — | — | blocked: not compiled into upstream macOS build |
+
+Better accuracy was not worth doubling the tail latency on a key you hold down. That "blocked" row is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled — Parakeet is now the default, and the official Whisper-only binary is kept for one-command rollback.
+
+Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests (57 tests: audio framing, text clean, physics bounds, kernel recycling), timing instrumentation behind `POPCORNHUD_TIMING=1`, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
+
+Built with AI pair-programming (Claude Code, Codex). Architecture, product decisions, review, and macOS integration are mine.
 
 ## Daily use
 
-Hold **FN** (🌐) to record; release to type. Escape cancels.
-Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
-Popcorn bag reacts while recording; collapses to a **Transcribing…** capsule, then dismisses.
+Menu bar → **Dictation model** switches engines (downloads on first pick, Ready line shows the active one). **Fix "…"** opens the last typed text; edit and **Save & Learn** (⌘↩). **More → Edit learned words…** for manual edits.
 
-Open **VoicePop** from Applications — Dock icon plus a **VoicePop** menu-bar item. Opening again pops the menu. Quit from that menu stays quit until next login or you open the app again.
+State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl` (rotates at 1 MiB — delete to clear), `corrections.jsonl`, `replacements.json`. Names you say often are seeded via `scripts/seed-replacements.py`.
 
-Menu bar → **Dictation model** picks **Parakeet** (NVIDIA `parakeet-tdt-0.6b-v3`, default) or Whisper (Tiny, Base, Small, Medium, Large turbo). The first time you pick a model that is not installed, VoicePop downloads it and restarts dictation. The Ready line shows the active model (`Ready · Parakeet`). **Fix “…”** is the last thing typed — click it if the model missed.
-
-VoicePop warms the active model once after login (then unloads). The `[whisper] initial_prompt` hint list only applies to the Whisper engine, so it does nothing while Parakeet is active.
-Names you say often (product names, people, jargon) are carried by `~/.config/voicepop/replacements.json` instead — seed or top it up with `scripts/seed-replacements.py`.
-
-## Styles and learning
-
-Menu bar → **Writing style**: **Automatic**, **Casual**, or **Formal**. The lower half is an override for the app you were just in (Messages → Casual, Mail → Formal). Terminals are never restyled.
-
-**Fix last text…** opens what was just typed; edit it and **Save & Learn** (⌘↩). Those substitutions apply to future dictation. **More → Edit learned words…** opens the list for manual edits.
-
-Files (plain JSON, local only): `~/.config/voicepop/style.json`, `history.jsonl` (every dictation, rotates at 1 MiB — delete it to clear), `corrections.jsonl`, `replacements.json`.
-
-Formal can also polish with a local model (`qwen3.5:4b-mlx`). VoicePop starts `ollama serve` on demand (log: `/tmp/voicepop-ollama.log`) and leaves it running. Uncheck **Polish Formal with AI** to stay rules-only. If the model is slow or down, the rules output is typed unchanged within Voxtype's 5 s budget.
-
-## One-time / after upgrade
+<details>
+<summary><b>Build from source, rollback, instrumentation</b></summary>
 
 Build companion binaries **before** install (config points at `bin/voxtype-clean`):
 
@@ -51,18 +86,14 @@ Build companion binaries **before** install (config points at `bin/voxtype-clean
 cd ~/VoicePop
 ./scripts/install-voxtype.sh
 ./scripts/uninstall-caps-remap.sh   # restore Caps Lock if remap was previously installed
-./scripts/setup-launch-agents.sh    # packages VoicePop.app → /Applications, removes old LaunchAgent
+./scripts/setup-launch-agents.sh    # packages VoicePop.app → /Applications
 ```
 
-After any HUD rebuild, rerun `./scripts/setup-launch-agents.sh` — it rebuilds, signs `VoicePop.app` with Apple Development (ad-hoc fallback), replaces `/Applications/VoicePop.app`, and launches it. Do not run a second HUD binary. If Dock/Finder keep the old icon: `killall Dock`.
+After any HUD rebuild, rerun `./scripts/setup-launch-agents.sh` — it rebuilds, signs, replaces `/Applications/VoicePop.app`, and relaunches. Never run a second HUD binary. Stale Dock icon: `killall Dock`. `scripts/make-release.sh` produces both release artifacts.
 
 Grant **Accessibility**, **Input Monitoring**, and **Microphone** to **Voxtype.app** (not Terminal, not VoicePop).
 
-## Models
-
-Default is NVIDIA Parakeet **`parakeet-tdt-0.6b-v3`** via a local 1.0.1 rebuild (`gpu-metal,parakeet,parakeet-coreml`). Official `macos-universal` is Whisper-only; that binary is saved at `.cache/voxtype-1.0.1-macos-universal-official`. Whisper models stay installed as a menu fallback.
-
-## Rollback
+Roll back to the official Whisper-only engine:
 
 ```bash
 cp .cache/voxtype-1.0.1-macos-universal-official /Applications/Voxtype.app/Contents/MacOS/voxtype-bin
@@ -71,16 +102,22 @@ cp .cache/voxtype-1.0.1-macos-universal-official /opt/homebrew/bin/voxtype
 ./scripts/restart-voxtype.sh
 ```
 
-## Timing instrumentation
-
-Quit VoicePop first so only one HUD runs. `open -a` does **not** inherit env vars. Run the bundled binary:
+Timing (quit VoicePop first; `open -a` does not inherit env):
 
 ```bash
 POPCORNHUD_TIMING=1 /Applications/VoicePop.app/Contents/MacOS/VoicePop
 ```
 
-## Specs
+</details>
 
-- [SPEC.md](SPEC.md) — original Mac port (v2)
-- [SPEC-v3.md](SPEC-v3.md) — realistic popcorn + responsive dictation
-- [NOTES.md](NOTES.md) — discoveries and DoD
+## Known limits
+
+Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is dead weight while Parakeet is active — vocabulary goes in `replacements.json` instead. Live warm-path latency targets in [docs/metrics.md](docs/metrics.md) are still unmeasured.
+
+## Docs
+
+[SPEC.md](SPEC.md) — original Mac port · [SPEC-v3.md](SPEC-v3.md) — realistic popcorn + responsive dictation · [NOTES.md](NOTES.md) — discoveries and definition of done · [docs/metrics.md](docs/metrics.md) — benchmarks
+
+## Credits
+
+Speech engine: [Voxtype](https://voxtype.io) by peteonrails (MIT). ASR models: NVIDIA Parakeet, OpenAI Whisper. VoicePop is MIT — see [LICENSE](LICENSE).
