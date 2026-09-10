@@ -36,6 +36,12 @@ cp "$HUD" "$CONTENTS/MacOS/VoicePop"
 chmod +x "$CONTENTS/MacOS/VoicePop"
 cp "$ROOT/scripts/restart-voxtype.sh" "$CONTENTS/Resources/restart-voxtype.sh"
 chmod +x "$CONTENTS/Resources/restart-voxtype.sh"
+# Bundled copies so a downloaded VoicePop.app is self-contained (install.sh points Voxtype at them).
+if [[ -x "$ROOT/bin/voxtype-clean" ]]; then
+  cp "$ROOT/bin/voxtype-clean" "$CONTENTS/MacOS/voxtype-clean"
+  chmod +x "$CONTENTS/MacOS/voxtype-clean"
+fi
+cp "$ROOT/config/config.toml" "$CONTENTS/Resources/config.toml"
 
 echo "==> App icon"
 ICONSET="$DIST/AppIcon.iconset"

@@ -13,9 +13,10 @@ version_ge() {
 }
 
 has_compiled_parakeet() {
-  local bin="$1"
+  local bin="$1" out
   [[ -x "$bin" ]] || return 1
-  "$bin" info engines 2>/dev/null | grep -q 'compiled  parakeet'
+  out="$("$bin" info engines 2>/dev/null || true)"
+  grep -q 'compiled  parakeet' <<<"$out"
 }
 
 if has_compiled_parakeet "$APP_BIN" && [[ "$FORCE" != "1" ]]; then
