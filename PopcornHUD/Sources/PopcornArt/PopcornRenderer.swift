@@ -122,7 +122,7 @@ public enum PopcornRenderer {
         // slight stretch instead of freezing at rest, so there is no hitch at the zero crossing.
         let kick = scene.reduceMotion ? 0 : CGFloat(scene.kick)
         let squashOnly = max(0, kick)
-        let mouthSag: CGFloat = 8
+        let mouthSag = Tunables.rimRy
 
         drawHaze(ctx: &ctx, cx: cx, bagTop: bagTop, scene: scene)
         drawFlying(ctx: &ctx, front: false, scene: scene)
@@ -198,12 +198,14 @@ public enum PopcornRenderer {
             layer.fill(bag, with: .color(.black.opacity(0.14)))
         }
 
-        // Dark interior / rear ellipse behind heap
+        // Dark interior / rear ellipse behind heap — matches the rim's inner opening
+        let innerRx = Tunables.mouthHalf - Tunables.rimBand
+        let innerRy = max(2, mouthSag - Tunables.rimBand * 0.55)
         let interiorRect = CGRect(
-            x: cx - Tunables.mouthHalf + 6,
-            y: bagTop - 10,
-            width: Tunables.mouthHalf * 2 - 12,
-            height: 22
+            x: cx - innerRx,
+            y: bagTop - innerRy,
+            width: innerRx * 2,
+            height: innerRy * 2
         )
         ctx.fill(
             Path(ellipseIn: interiorRect),
@@ -214,16 +216,16 @@ public enum PopcornRenderer {
                 ]),
                 center: CGPoint(x: cx, y: bagTop + 2),
                 startRadius: 0,
-                endRadius: Tunables.mouthHalf
+                endRadius: innerRx
             )
         )
         // Rear rim highlight
         var rearRim = Path()
         rearRim.addEllipse(in: CGRect(
-            x: cx - Tunables.mouthHalf + 4,
-            y: bagTop - 8,
-            width: Tunables.mouthHalf * 2 - 8,
-            height: 16
+            x: cx - innerRx - 1,
+            y: bagTop - innerRy - 1,
+            width: (innerRx + 1) * 2,
+            height: (innerRy + 1) * 2
         ))
         ctx.stroke(rearRim, with: .color(PaletteUI.bagCream.opacity(0.35)), lineWidth: 1.2)
 
@@ -312,8 +314,8 @@ public enum PopcornRenderer {
             )
         }
 
-        // Rolled scalloped front lip
-        drawScallopedLip(ctx: &ctx, cx: cx, bagTop: bagTop, mouthSag: mouthSag)
+        // Rolled rim
+        drawRimBand(ctx: &ctx, cx: cx, bagTop: bagTop, mouthSag: mouthSag)
 
         ctx.stroke(bag, with: .color(PaletteUI.bagRed.opacity(0.40)), lineWidth: 1.2)
     }
@@ -329,87 +331,82 @@ public enum PopcornRenderer {
     }
 
     private static func mouthY(bagTop: CGFloat, sag: CGFloat, t: CGFloat) -> CGFloat {
-        // Parabolic sag of front lip (0 at edges, sag at center).
-        let u = t * 2 - 1
-        return bagTop + sag * (1 - u * u)
+        // Front half of the rim ellipse: 0 at the sides, `sag` at the center.
+        let u = min(1, max(-1, t * 2 - 1))
+        return bagTop + sag * sqrt(1 - u * u)
     }
 
+    /// Movie-theater tub: elliptical rim, straight walls with a slight outward bow,
+    /// narrower rounded base.
     private static func bagPath(cx: CGFloat, bagTop: CGFloat, bagBottom: CGFloat, mouthSag: CGFloat) -> Path {
         var p = Path()
         let topL = CGPoint(x: cx - Tunables.mouthHalf, y: bagTop)
         let topR = CGPoint(x: cx + Tunables.mouthHalf, y: bagTop)
-        let midL = CGPoint(x: cx - Tunables.baseHalf - Tunables.sidePinch, y: bagTop + Tunables.bagH * 0.55)
-        let midR = CGPoint(x: cx + Tunables.baseHalf + Tunables.sidePinch, y: bagTop + Tunables.bagH * 0.55)
         let botL = CGPoint(x: cx - Tunables.baseHalf, y: bagBottom - Tunables.baseCorner)
         let botR = CGPoint(x: cx + Tunables.baseHalf, y: bagBottom - Tunables.baseCorner)
+        // Walls taper straight from rim to base; the control sits just outside the
+        // midpoint of that line so the side reads as a shallow bow, not a pinch.
+        let wallMidX = (Tunables.mouthHalf + Tunables.baseHalf) / 2 + Tunables.sidePinch
+        let wallMidY = bagTop + Tunables.bagH * 0.55
 
         p.move(to: topL)
-        // Curved front mouth (sagging lip)
-        p.addQuadCurve(
-            to: topR,
-            control: CGPoint(x: cx, y: bagTop + mouthSag * 1.15)
-        )
-        p.addLine(to: midR)
-        p.addQuadCurve(to: botR, control: CGPoint(x: midR.x, y: bagBottom - Tunables.baseCorner - 10))
-        p.addQuadCurve(to: botL, control: CGPoint(x: cx, y: bagBottom + 2))
-        p.addQuadCurve(to: midL, control: CGPoint(x: midL.x, y: bagBottom - Tunables.baseCorner - 10))
+        // Front half of the rim ellipse.
+        p.addQuadCurve(to: topR, control: CGPoint(x: cx, y: bagTop + mouthSag * 1.30))
+        p.addQuadCurve(to: botR, control: CGPoint(x: cx + wallMidX, y: wallMidY))
+        // Shallow base ellipse.
+        p.addQuadCurve(to: botL, control: CGPoint(x: cx, y: bagBottom + Tunables.baseCorner * 0.9))
+        p.addQuadCurve(to: topL, control: CGPoint(x: cx - wallMidX, y: wallMidY))
         p.closeSubpath()
         return p
     }
 
-    private static func drawScallopedLip(
+    /// Rolled rim: an elliptical ring around the mouth, overhanging the wall.
+    private static func drawRimBand(
         ctx: inout GraphicsContext,
         cx: CGFloat,
         bagTop: CGFloat,
         mouthSag: CGFloat
     ) {
-        let toothCount = Tunables.toothCount
-        var lip = Path()
-        let rimH: CGFloat = 4.5
+        let outerRx = Tunables.mouthHalf + Tunables.rimOverhang
+        let outerRy = mouthSag + Tunables.rimOverhang * 0.7
+        let innerRx = Tunables.mouthHalf - Tunables.rimBand
+        let innerRy = max(2, mouthSag - Tunables.rimBand * 0.55)
 
-        // Band along mouth curve
-        for i in 0...toothCount {
-            let t = CGFloat(i) / CGFloat(toothCount)
-            let x = mouthX(cx: cx, t: t)
-            let y = mouthY(bagTop: bagTop, sag: mouthSag, t: t)
-            if i == 0 {
-                lip.move(to: CGPoint(x: x, y: y))
-            } else {
-                lip.addLine(to: CGPoint(x: x, y: y))
-            }
-        }
-        // Scalloped underside
-        for i in stride(from: toothCount, through: 0, by: -1) {
-            let t = CGFloat(i) / CGFloat(toothCount)
-            let x = mouthX(cx: cx, t: t)
-            let baseY = mouthY(bagTop: bagTop, sag: mouthSag, t: t)
-            let scallop: CGFloat
-            if i == 0 || i == toothCount {
-                scallop = 0
-            } else {
-                // Rounded peaks between teeth
-                let local = (t * CGFloat(toothCount)).truncatingRemainder(dividingBy: 1)
-                let mid = abs(local - 0.5) * 2 // 0 at mid-tooth, 1 at edges
-                scallop = Tunables.toothH * (1 - mid * mid)
-            }
-            lip.addLine(to: CGPoint(x: x, y: baseY + rimH + scallop))
-        }
-        lip.closeSubpath()
+        var ring = Path()
+        ring.addEllipse(in: CGRect(
+            x: cx - outerRx, y: bagTop - outerRy,
+            width: outerRx * 2, height: outerRy * 2
+        ))
+        ring.addEllipse(in: CGRect(
+            x: cx - innerRx, y: bagTop - innerRy,
+            width: innerRx * 2, height: innerRy * 2
+        ))
+        let evenOdd = FillStyle(eoFill: true)
 
-        // Soft shadow under rim
+        // Soft shadow under the rim
         ctx.drawLayer { layer in
-            layer.translateBy(x: 0, y: 1.2)
-            layer.fill(lip, with: .color(.black.opacity(0.18)))
+            layer.translateBy(x: 0, y: 1.6)
+            layer.fill(ring, with: .color(.black.opacity(0.18)), style: evenOdd)
         }
-        ctx.fill(lip, with: .linearGradient(
+        ctx.fill(ring, with: .linearGradient(
             Gradient(colors: [
                 PaletteUI.bagCream,
-                PaletteUI.bagCream.opacity(0.92),
+                PaletteUI.bagCream.opacity(0.88),
             ]),
-            startPoint: CGPoint(x: cx, y: bagTop - 2),
-            endPoint: CGPoint(x: cx, y: bagTop + rimH + Tunables.toothH)
-        ))
-        ctx.stroke(lip, with: .color(PaletteUI.bagRed.opacity(0.55)), lineWidth: 1)
+            startPoint: CGPoint(x: cx - outerRx, y: bagTop - outerRy),
+            endPoint: CGPoint(x: cx + outerRx, y: bagTop + outerRy)
+        ), style: evenOdd)
+        ctx.stroke(ring, with: .color(PaletteUI.bagRed.opacity(0.55)), lineWidth: 1)
+
+        // Specular along the top of the roll, front half only.
+        var gleam = Path()
+        for i in 0...16 {
+            let t = CGFloat(i) / 16
+            let x = mouthX(cx: cx, t: t)
+            let y = mouthY(bagTop: bagTop, sag: mouthSag, t: t) - Tunables.rimBand * 0.30
+            if i == 0 { gleam.move(to: CGPoint(x: x, y: y)) } else { gleam.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        ctx.stroke(gleam, with: .color(.white.opacity(0.30)), lineWidth: 1.4)
     }
 
     // MARK: - Flying / haze / capsule

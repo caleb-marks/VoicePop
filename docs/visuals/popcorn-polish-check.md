@@ -1,4 +1,4 @@
-# Popcorn voice-polish verification — 2026-09-10T03:19:11Z
+# Popcorn voice-polish verification — 2026-09-10T04:27:17Z
 
 Production HUD remains Canvas-only. Beagle captures use the fixed 260×420 point scene at
 actual size and 4× review scale; the beagle path uses only dog geometry and restrained motion.
@@ -11,9 +11,9 @@ actual size and 4× review scale; the beagle path uses only dog geometry and res
 - Seed 2026 sequence: quiet 0.035 (2 s), normal 0.12 (2 s), loud 0.28 (3 s),
   accents (2 s), silence (1 s). Light and dark backgrounds.
 - Peak kernel count in capture: 27 (cap 120).
-- Full sequence wall time (sim only path above): 127.1 ms.
-- Offscreen Canvas renders (2× light+dark pair): median 1.81 ms,
-  95th 1.96 ms. These are ImageRenderer measurements,
+- Full sequence wall time (sim only path above): 142.2 ms.
+- Offscreen Canvas renders (2× light+dark pair): median 1.62 ms,
+  95th 1.72 ms. These are ImageRenderer measurements,
   **not** live display/compositor frame timings and **not** microphone-to-screen latency.
 - Packet-to-render path is one display tick after `consumePeak` (held level between
   packets; onset only on fresh). Mic → Voxtype → socket → HUD is unmeasured here.
