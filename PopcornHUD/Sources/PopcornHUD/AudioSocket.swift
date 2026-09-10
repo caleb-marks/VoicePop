@@ -136,7 +136,7 @@ final class AudioSocketReader {
     }
 
     private func finishConnect(gen: UInt64) {
-        // Do not cancel the write source here — teardownFD owns it on failure,
+        // Do not cancel the write source here - teardownFD owns it on failure,
         // and on success we hand the fd to the read source without closing.
         guard active, gen == generation, fd >= 0 else {
             teardownFD()
@@ -161,7 +161,7 @@ final class AudioSocketReader {
 
     private func armReadSource(gen: UInt64) {
         guard fd >= 0 else { return }
-        // Cancel any prior read source without closing — teardownFD owns close.
+        // Cancel any prior read source without closing - teardownFD owns close.
         readSource?.cancel()
         readSource = nil
         let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)

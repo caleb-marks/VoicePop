@@ -18,7 +18,7 @@ public enum Palette {
 }
 
 /// SwiftUI mirrors of `Palette`, allocated once. `Color(nsColor:)` is a value conversion, so a
-/// cached value is indistinguishable from a fresh one — this is pixel-identical by construction.
+/// cached value is indistinguishable from a fresh one - this is pixel-identical by construction.
 public enum PaletteUI {
     public static let puffWhite = Color(nsColor: Palette.puffWhite)
     public static let puffCream = Color(nsColor: Palette.puffCream)

@@ -1,7 +1,7 @@
 # SPEC: Port Caleb’s Voxtype + Popcorn OSD to macOS
 
 **Audience:** Coding agent on an Apple Silicon Mac.
-**Goal:** Caleb’s Linux dictation setup (Voxtype + popcorn bag HUD) working daily on Mac — personal, free, no App Store, no monetization.
+**Goal:** Caleb’s Linux dictation setup (Voxtype + popcorn bag HUD) working daily on Mac - personal, free, no App Store, no monetization.
 **Success:** Hold CapsLock → speak → text appears at cursor in Notes, Terminal, Slack/Electron, Cursor; skinny popcorn bag appears while recording and disappears within ~100ms of release; no Wispr required.
 
 **Revision:** v2 (2026-09-06). Every Mac-specific claim below was checked against Voxtype 1.0.1 sources (`src/hotkey_macos.rs`, `src/output/paste.rs`, `src/config/root.rs`, `src/audio/levels.rs`, `src/setup/app_bundle.rs`) and rdev 0.5.3. Do not "improve" on them from memory.
@@ -81,7 +81,7 @@ README.md # how Caleb runs it day-to-day
 
 ---
 
-## 3. Phase 0 — Machine bootstrap (do first, no UI)
+## 3. Phase 0 - Machine bootstrap (do first, no UI)
 
 **Commands (run all):**
 
@@ -125,7 +125,7 @@ voxtype config # prints the resolved config; confirm it read ~/.config/voxtype/c
 
 Lock `STATE_PATH=/tmp/voxtype/state` and `AUDIO_SOCK=/tmp/voxtype/audio.sock` in NOTES.md. Values written to the state file: `idle`, `recording`, `transcribing`, `streaming`. The file is deleted when the daemon exits, so a missing file means "not running / not hot".
 
-**Permissions (agent cannot click TCC — print exact steps into README.md and NOTES.md, then continue building):**
+**Permissions (agent cannot click TCC - print exact steps into README.md and NOTES.md, then continue building):**
 
 1. Run `voxtype setup app-bundle` first (§4.4) so the grantee is **Voxtype** (`/Applications/Voxtype.app`), not Terminal.
 2. System Settings → Privacy & Security → **Accessibility** → add and enable Voxtype.
@@ -137,7 +137,7 @@ Lock `STATE_PATH=/tmp/voxtype/state` and `AUDIO_SOCK=/tmp/voxtype/audio.sock` in
 
 ---
 
-## 4. Phase 1 — Voxtype config (Mac)
+## 4. Phase 1 - Voxtype config (Mac)
 
 ### 4.1 Install config
 
@@ -264,7 +264,7 @@ voxtype config get hotkey.key # RIGHTALT
 
 ---
 
-## 5. Phase 2 — Mac `voxtype-clean`
+## 5. Phase 2 - Mac `voxtype-clean`
 
 Write `~/src/voxtype-mac-port/bin/voxtype-clean` (executable `chmod +x`).
 
@@ -300,7 +300,7 @@ echo 'hello world ,' | VOXTYPE_CLEAN_APP=Terminal bin/voxtype-clean # hello worl
 
 ---
 
-## 6. Phase 3 — PopcornHUD (SwiftUI/AppKit) — REQUIRED
+## 6. Phase 3 - PopcornHUD (SwiftUI/AppKit) - REQUIRED
 
 ### 6.1 Why
 
@@ -344,7 +344,7 @@ Heat mapping (copy Linux):
 - `heat = pow(clamp((peak-quiet)/(loud-quiet),0,1), heatCurve)`
 - Attack rate 28, release rate 4 (exponential approach: `v += (t-v)*(1-exp(-rate*dt))`)
 
-### 6.5 Visual / physics — copy these tunables exactly
+### 6.5 Visual / physics - copy these tunables exactly
 
 From `reference/Popcorn.qml`:
 
@@ -385,7 +385,7 @@ launchctl kickstart -k gui/$(id -u)/com.caleb.popcornhud
 
 ---
 
-## 7. Phase 4 — Integration scripts
+## 7. Phase 4 - Integration scripts
 
 ### `scripts/install-voxtype.sh`
 
@@ -437,7 +437,7 @@ Agent runs this checklist and pastes results into NOTES.md:
 | 2 | Config path | `diff config/config.toml ~/.config/voxtype/config.toml` is empty; `voxtype config get hotkey.key` prints `RIGHTALT` (or the documented fallback) |
 | 3 | State file | `/tmp/voxtype/state` changes `idle→recording→transcribing→idle` on one dictation |
 | 4 | TextEdit typing | Spoken sentence appears at cursor |
-| 5 | Terminal typing | Spoken sentence appears (Ghostty/Terminal/iTerm — whichever installed), not capitalized |
+| 5 | Terminal typing | Spoken sentence appears (Ghostty/Terminal/iTerm - whichever installed), not capitalized |
 | 6 | Cursor or VS Code typing | Spoken sentence appears in the editor and in its integrated terminal |
 | 7 | Popcorn visible | Bag shows within 200 ms of PTT down |
 | 8 | Popcorn exit | Bag fully gone within 100 ms of PTT up (do not wait for transcription) |

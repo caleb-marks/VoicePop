@@ -136,7 +136,7 @@ struct PopcornCapture {
         try? FileManager.default.removeItem(atPath: movieDir)
 
         let report = """
-        # \(mascot == .beagle ? "Nandor" : "Popcorn") voice-polish verification — \(ISO8601DateFormatter().string(from: Date()))
+        # \(mascot == .beagle ? "Nandor" : "Popcorn") voice-polish verification - \(ISO8601DateFormatter().string(from: Date()))
 
         Production HUD remains Canvas-only. Beagle captures use the fixed 260×420 point scene at
         actual size and 4× review scale; the beagle path uses only dog geometry and restrained motion.
@@ -167,7 +167,7 @@ struct PopcornCapture {
         - `beagle-loud-reducemotion-light.png` / `beagle-loud-reducemotion-dark.png` (geometry must match quiet)
         - `beagle-transcribing-light.png` / `beagle-transcribing-dark.png` (capsule only)
         - `kernel-preview.png` (legacy popcorn route)
-        - `\(prefix)polish.mp4`: 60 fps deterministic input demo — **not** microphone footage.
+        - `\(prefix)polish.mp4`: 60 fps deterministic input demo - **not** microphone footage.
 
         ## Still required (live)
 

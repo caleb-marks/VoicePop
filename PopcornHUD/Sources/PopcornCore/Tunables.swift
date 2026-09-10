@@ -85,7 +85,7 @@ public enum Tunables {
     /// Squash-and-stretch of the bag per px of kick (bottom-anchored): wider, shorter.
     /// Raised so the recoil is visible without touching the spring itself: at the `maxKick` 8
     /// clamp this is sx 1.080 / sy 0.872, and at the spring's worst negative overshoot
-    /// (kick ≈ -0.4) it is sx 0.996 / sy 1.006 — both strictly positive, no degenerate transform.
+    /// (kick ≈ -0.4) it is sx 0.996 / sy 1.006 - both strictly positive, no degenerate transform.
     public static let kickSquashX: Double = 0.010
     public static let kickSquashY: Double = 0.016
 
@@ -167,7 +167,7 @@ public struct HeapPiece: Equatable, Sendable {
 /// Asymmetric overlapping mound that fills the mouth and spills both shoulders.
 public enum HeapSeed {
     private static let seeds: [HeapPiece] = [
-        // Far row — fills rear lip
+        // Far row - fills rear lip
         .init(dx: -34, dy: -18, s: 0.88, far: true, shape: 0, rot: -0.55, butter: 0.14),
         .init(dx: -18, dy: -28, s: 1.05, far: true, shape: 3, rot: 0.72, butter: 0.20),
         .init(dx: -2, dy: -36, s: 1.14, far: true, shape: 1, rot: -0.22, butter: 0.18),
@@ -175,7 +175,7 @@ public enum HeapSeed {
         .init(dx: 30, dy: -20, s: 0.90, far: true, shape: 4, rot: -0.80, butter: 0.15),
         .init(dx: 42, dy: -8, s: 0.82, far: true, shape: 9, rot: 0.35, butter: 0.12),
         .init(dx: -44, dy: -6, s: 0.80, far: true, shape: 2, rot: -1.05, butter: 0.12),
-        // Near row — irregular spill over shoulders
+        // Near row - irregular spill over shoulders
         .init(dx: -28, dy: -8, s: 1.00, far: false, shape: 5, rot: 0.40, butter: 0.34),
         .init(dx: -12, dy: -16, s: 1.16, far: false, shape: 7, rot: -0.88, butter: 0.40),
         .init(dx: 4, dy: -20, s: 1.20, far: false, shape: 8, rot: 0.28, butter: 0.36),

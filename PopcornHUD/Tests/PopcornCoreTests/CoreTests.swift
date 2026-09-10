@@ -54,7 +54,7 @@ final class AudioLevelHoldTests: XCTestCase {
         XCTAssertEqual(fresh.freshness, .fresh)
         XCTAssertEqual(fresh.peak, 0.25, accuracy: 0.0001)
 
-        // Display tick with no new packet must hold level — not invent silence.
+        // Display tick with no new packet must hold level - not invent silence.
         let held = hold.consume(nowMs: 1020, staleMs: 250)
         XCTAssertEqual(held.freshness, .held)
         XCTAssertEqual(held.peak, 0.25, accuracy: 0.0001)

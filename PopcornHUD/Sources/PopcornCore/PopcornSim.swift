@@ -129,7 +129,7 @@ public final class PopcornSim {
         if let prev = prevMono {
             var dt = Double(mono &- prev) / 1000.0
             if dt < 0 || dt > 0.25 {
-                // Sleep / clock jump — reset accumulator, no catch-up burst
+                // Sleep / clock jump - reset accumulator, no catch-up burst
                 accum = 0
                 dt = Tunables.simDt
             }
@@ -178,7 +178,7 @@ public final class PopcornSim {
 
         if allowSpawn, !reduceMotion, !levelsUnavailable {
             spawnAccum += Tunables.popsPerSecond(heat: heat) * dt
-            // Accents only from fresh packet information — not held display samples.
+            // Accents only from fresh packet information - not held display samples.
             // Use target (from this packet) so attack lag cannot miss the onset.
             if peakFresh {
                 let rise = target - onsetBaseline

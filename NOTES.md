@@ -1,4 +1,4 @@
-# Voxtype Mac Port — Agent Notes
+# Voxtype Mac Port - Agent Notes
 
 **Project root:** `~/VoicePop` (maps to SPEC `~/src/voxtype-mac-port/`)
 **Machine:** arm64, macOS 26.6.2 (Build 25G83), Homebrew present, Xcode CLT present
@@ -53,7 +53,7 @@ See also: [docs/metrics.md](docs/metrics.md), [SPEC-v3.md](SPEC-v3.md).
 
 ### Phase 3
 
-- **heap reconstructed; Linux QML absent** — 17 mound pieces seeded in `HeapSeed` (Tunables.swift).
+- **heap reconstructed; Linux QML absent** - 17 mound pieces seeded in `HeapSeed` (Tunables.swift).
 - PopcornHUD release build OK; HUD now ships as `/Applications/VoicePop.app` (Login Item). Legacy LaunchAgent `com.caleb.popcornhud` retired.
 - Audio path: nonblocking socket + generation fencing; production path does **not** inject synthetic heat (unavailable levels show detail text instead).
 - Login Items currently include Voxtype (and unrelated Wispr Flow / Codex).
@@ -71,8 +71,8 @@ See also: [docs/metrics.md](docs/metrics.md), [SPEC-v3.md](SPEC-v3.md).
 
 ### Visual overhaul (2026-09-06)
 
-- New `PopcornArt` library target (`Palette.swift`, `PopcornRenderer.swift`) — single Canvas renderer shared by `PopcornHUD` and `PopcornCapture`; capture PNGs now match the live HUD exactly.
-- Kernels: hull remnant, per-lobe highlights (settled/heap only — airborne skip the pass for frame budget), hull-rooted creases, roughened outlines, `kernelRadius` 11 → 13.
+- New `PopcornArt` library target (`Palette.swift`, `PopcornRenderer.swift`) - single Canvas renderer shared by `PopcornHUD` and `PopcornCapture`; capture PNGs now match the live HUD exactly.
+- Kernels: hull remnant, per-lobe highlights (settled/heap only - airborne skip the pass for frame budget), hull-rooted creases, roughened outlines, `kernelRadius` 11 → 13.
 - Bag: sagging front lip + dark interior, perspective stripes, left/right shading, scalloped rim, ground shadow. Far heap now draws *behind* the front wall so kernels read as inside the bucket.
 - `setup-launch-agents.sh` packages and signs `VoicePop.app` (Apple Development; ad-hoc fallback). Do not install `bin/PopcornHUD`.
 
@@ -92,19 +92,19 @@ See also: [docs/metrics.md](docs/metrics.md), [SPEC-v3.md](SPEC-v3.md).
 6. After `brew upgrade voxtype`, rerun `voxtype setup app-bundle` and re-grant 2–4.
 7. Never run the daemon from Terminal for real use (TCC identity becomes Terminal).
 
-## Section 9 — Definition of Done
+## Section 9 - Definition of Done
 
 | # | Test | Result |
 |---|------|--------|
-| 1 | `voxtype --version` ≥ 1.0.1 | PASS — `voxtype 1.0.1` |
-| 2 | config diff empty; hotkey | PASS — `FN`; engine `parakeet`; `smart_auto_submit=false` |
-| 3 | state idle→recording→transcribing→idle | PENDING — needs Input Monitoring/Accessibility (Caleb) |
-| 4 | TextEdit typing | PENDING — TCC |
-| 5 | Terminal typing (no capitalize) | PENDING — TCC; clean script unit-tested |
-| 6 | Cursor/VS Code typing | PENDING — TCC |
-| 7 | Popcorn visible ≤200 ms | PARTIAL — HUD enter uses wall-clock 140 ms; live PTT pending TCC |
-| 8 | Popcorn exit ≤100 ms | PARTIAL — collapse 100 ms wall-clock then freeze capsule; live PTT pending TCC |
-| 9 | No glass panel | PASS by design — bag + kernels only, clear panel |
+| 1 | `voxtype --version` ≥ 1.0.1 | PASS - `voxtype 1.0.1` |
+| 2 | config diff empty; hotkey | PASS - `FN`; engine `parakeet`; `smart_auto_submit=false` |
+| 3 | state idle→recording→transcribing→idle | PENDING - needs Input Monitoring/Accessibility (Caleb) |
+| 4 | TextEdit typing | PENDING - TCC |
+| 5 | Terminal typing (no capitalize) | PENDING - TCC; clean script unit-tested |
+| 6 | Cursor/VS Code typing | PENDING - TCC |
+| 7 | Popcorn visible ≤200 ms | PARTIAL - HUD enter uses wall-clock 140 ms; live PTT pending TCC |
+| 8 | Popcorn exit ≤100 ms | PARTIAL - collapse 100 ms wall-clock then freeze capsule; live PTT pending TCC |
+| 9 | No glass panel | PASS by design - bag + kernels only, clear panel |
 | 10 | Cleanup `Hi,` | PASS |
-| 11 | Restart persistence | PASS — Voxtype Login Item + VoicePop.app Login Item |
-| 12 | Audio feed | PASS — socket path + nonblocking reader (connected only after SO_ERROR==0) |
+| 11 | Restart persistence | PASS - Voxtype Login Item + VoicePop.app Login Item |
+| 12 | Audio feed | PASS - socket path + nonblocking reader (connected only after SO_ERROR==0) |

@@ -45,7 +45,7 @@ Visual acceptance: capture recording, quiet speech, loud speech, and transcribin
 
 ## 4. Physics and speech response
 
-Retain a lightweight two-dimensional simulation behind the existing renderer. Start with cached art and simple compound collision shapes—several small circles approximating each kernel. Do not introduce a full 3D renderer.
+Retain a lightweight two-dimensional simulation behind the existing renderer. Start with cached art and simple compound collision shapes - several small circles approximating each kernel. Do not introduce a full 3D renderer.
 
 - Advance physics at fixed 1/120-second steps using a monotonic clock, which cannot jump when the system time changes. Interpolate drawing between simulation states. Cap catch-up work at eight steps per rendered frame and reset accumulated time after sleep or a long suspension.
 - Collide airborne kernels with other active kernels, the rim, and the heap surface. Resolve overlap, apply friction, and reduce bounce energy on contact. Initial bounce retention: 0.2–0.35; tune visually. Replace random collision decisions with geometric contact checks.
@@ -138,7 +138,7 @@ These are acceptance targets, not claims of achieved performance. If hardware or
 
 Use at least 40 transcribed reference clips covering short commands, ordinary prose, names, numbers, punctuation, quiet speech, moderate noise, and longer 30–60-second passages. Replay identical audio for each engine, then verify live hotkey-to-insertion separately. Repeat latency runs at least three times. Keep a held-out subset for validation after tuning.
 
-Score word error rate—substituted, missing, and extra words divided by reference words—and exact recognition of critical names/numbers. Report punctuation separately. A candidate must not regress the names/numbers subset or omit initial/final words. If no candidate improves both speed and accuracy, retain the baseline and report the measured tradeoff rather than selecting by speed alone.
+Score word error rate - substituted, missing, and extra words divided by reference words - and exact recognition of critical names/numbers. Report punctuation separately. A candidate must not regress the names/numbers subset or omit initial/final words. If no candidate improves both speed and accuracy, retain the baseline and report the measured tradeoff rather than selecting by speed alone.
 
 ## 9. Delivery order and evidence
 
