@@ -42,6 +42,14 @@ if [[ -x "$ROOT/bin/voxtype-clean" ]]; then
   chmod +x "$CONTENTS/MacOS/voxtype-clean"
 fi
 cp "$ROOT/config/config.toml" "$CONTENTS/Resources/config.toml"
+VOX_SRC="${VOXTYPE_BIN:-/Applications/Voxtype.app/Contents/MacOS/voxtype-bin}"
+VOX_ENGINES="$( [[ -x "$VOX_SRC" ]] && "$VOX_SRC" info engines 2>/dev/null || true )"
+if grep -q 'compiled  parakeet' <<<"$VOX_ENGINES"; then
+  cp "$VOX_SRC" "$CONTENTS/Resources/voxtype-bin"
+  chmod +x "$CONTENTS/Resources/voxtype-bin"
+else
+  echo "WARNING: no Parakeet-capable voxtype-bin at $VOX_SRC; app will not be able to self-install Voxtype (set VOXTYPE_BIN)" >&2
+fi
 
 echo "==> App icon"
 ICONSET="$DIST/AppIcon.iconset"

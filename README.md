@@ -10,15 +10,15 @@ Built with AI pair-programming (Claude Code, Codex). Architecture, product decis
 
 ## Install (download)
 
-Apple Silicon, macOS 13+. Grab the latest `VoicePop-<version>-macos-arm64.zip` from [Releases](https://github.com/caleb-marks/VoicePop/releases), unzip, then:
+Apple Silicon, macOS 13+.
 
-```bash
-cd ~/Downloads/VoicePop-*-macos-arm64 && ./install.sh
-```
+1. Download `VoicePop-<version>.dmg` from [Releases](https://github.com/caleb-marks/VoicePop/releases).
+2. Open it and drag **VoicePop** onto **Applications**.
+3. Open VoicePop. On first launch it installs the Voxtype speech engine, downloads the Parakeet model (about 2.4 GB, once), writes its settings, and starts dictation. It then walks you to the two switches macOS requires: **Accessibility** and **Input Monitoring** for Voxtype, and **Keyboard → Press 🌐 key to: Do Nothing**.
 
-The installer sets up the Voxtype speech engine (bundled Parakeet-capable build), downloads the Parakeet model (about 2.4 GB, once), writes `~/.config/voxtype/config.toml` if you have none, and installs `/Applications/VoicePop.app`. Afterwards grant **Accessibility**, **Input Monitoring**, and **Microphone** to Voxtype in System Settings, and set **Keyboard → Press 🌐 key to: Do Nothing**.
+The app is signed with a developer certificate but not notarized. If macOS says it cannot verify the app, go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** once.
 
-The app is signed but not notarized. If macOS blocks it, right-click → Open once, or re-run `install.sh` (it clears quarantine). Building from source is under [One-time / after upgrade](#one-time--after-upgrade); `scripts/make-release.sh` produces the zip.
+Prefer Terminal? The `-macos-arm64.zip` asset has the same app plus an `install.sh`. Building from source is under [One-time / after upgrade](#one-time--after-upgrade); `scripts/make-release.sh` produces both artifacts.
 
 ## Daily use
 
