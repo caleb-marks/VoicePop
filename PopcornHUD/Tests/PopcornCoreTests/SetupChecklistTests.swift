@@ -10,15 +10,24 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertTrue(list.state(of: .fnKey).isDone)
         XCTAssertFalse(list.state(of: .permissions).isDone, "recording + transcript does not prove typing works")
         XCTAssertFalse(list.isComplete)
-        list.observePracticeText("hello there")
+        list.observePracticeText("hello there", secondsSinceTranscript: 0.8)
         XCTAssertTrue(list.state(of: .permissions).isDone)
         XCTAssertTrue(list.isComplete)
     }
 
     func testWhitespacePracticeTextIsNotEvidence() {
         var list = SetupChecklist(engine: .done("ok"), model: .done("ok"))
-        list.observePracticeText("  \n")
+        list.observePracticeText("  \n", secondsSinceTranscript: 0.5)
         XCTAssertFalse(list.evidence.practiceInsertionObserved)
+    }
+
+    func testHandTypedPracticeTextIsNotEvidence() {
+        var list = SetupChecklist(engine: .done("ok"), model: .done("ok"))
+        list.observePracticeText("typed by hand", secondsSinceTranscript: nil)
+        XCTAssertFalse(list.evidence.practiceInsertionObserved)
+        list.observeTranscript()
+        list.observePracticeText("typed much later", secondsSinceTranscript: 60)
+        XCTAssertFalse(list.state(of: .permissions).isDone)
     }
 
     func testIdleOrTranscribingStateIsNotFnEvidence() {

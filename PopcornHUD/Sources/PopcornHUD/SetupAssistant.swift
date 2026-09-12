@@ -1,14 +1,18 @@
 import AppKit
 import Foundation
+import PopcornCore
 
-/// First-run installer so a downloaded VoicePop.app sets itself up like a normal Mac app.
-/// Moves itself to /Applications, installs the bundled Parakeet-capable Voxtype build as
-/// /Applications/Voxtype.app, downloads the speech model, writes a Voxtype config that routes
-/// dictation through the bundled voxtype-clean, starts the daemon, and points the user at the
-/// two System Settings switches macOS insists on. Does nothing on a machine already set up.
+/// First-run installer and recovery checklist, so a downloaded VoicePop.app sets itself up like a
+/// normal Mac app. Moves itself to /Applications, installs the bundled Parakeet-capable Voxtype
+/// build as /Applications/Voxtype.app, writes a Voxtype config that routes dictation through the
+/// bundled voxtype-clean, downloads the speech model, then guides the macOS permissions, the
+/// FN/Globe key, and a practice dictation in one checklist window (`SetupChecklistWindow`).
 ///
-/// Env: VOICEPOP_SETUP_SKIP=1 bypasses everything (dev builds); VOICEPOP_SETUP_FORCE=1 runs the
-/// flow even when nothing is missing; VOICEPOP_SETUP_AUTO=1 answers prompts without dialogs.
+/// All process and file work runs off the main thread. Engine/model state is always re-probed;
+/// permission, FN, and practice steps complete only on functional evidence.
+///
+/// Env: VOICEPOP_SETUP_SKIP=1 bypasses everything (dev builds); VOICEPOP_SETUP_FORCE=1 opens the
+/// checklist even when nothing is missing; VOICEPOP_SETUP_AUTO=1 answers prompts without dialogs.
 enum SetupAssistant {
     static let modelName = "parakeet-tdt-0.6b-v3-int8"
     static let voxtypeApp = "/Applications/Voxtype.app"
@@ -17,7 +21,7 @@ enum SetupAssistant {
     private static var env: [String: String] { ProcessInfo.processInfo.environment }
     private static var skip: Bool { env["VOICEPOP_SETUP_SKIP"] == "1" }
     private static var force: Bool { env["VOICEPOP_SETUP_FORCE"] == "1" }
-    private static var auto: Bool { env["VOICEPOP_SETUP_AUTO"] == "1" }
+    static var auto: Bool { env["VOICEPOP_SETUP_AUTO"] == "1" }
 
     private static var bundleURL: URL { Bundle.main.bundleURL }
     private static var isAppBundle: Bool { bundleURL.pathExtension == "app" }
@@ -33,46 +37,49 @@ enum SetupAssistant {
         var errorDescription: String? { message }
     }
 
-    /// Calls `continueStartup` when the app should carry on. Does not call it when the app is
-    /// relaunching itself from /Applications, or when setup failed.
-    @MainActor static func runIfNeeded(then continueStartup: @escaping () -> Void) {
+    /// Calls `continueStartup` once the engine and model are ready. Does not call it while the app
+    /// is relaunching itself from /Applications. When something is missing, the checklist window
+    /// installs it with progress and retry, and calls `continueStartup` when that work succeeds.
+    static func runIfNeeded(then continueStartup: @escaping () -> Void) {
         guard isAppBundle, !skip else { continueStartup(); return }
-        if relocateIfNeeded() { return }
-        guard force || needsSetup() else { continueStartup(); return }
-
-        let window = SetupWindow()
-        window.show()
-        DispatchQueue.global(qos: .userInitiated).async {
-            var failure: String?
-            do {
-                try perform { message, fraction in
-                    fputs("VoicePop setup: \(message)\n", stderr)
-                    DispatchQueue.main.async { window.update(message: message, fraction: fraction) }
+        relocateIfNeeded { relaunching in
+            if relaunching { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let needed = force || needsSetup()
+                DispatchQueue.main.async {
+                    if needed {
+                        SetupChecklistWindowController.shared.present(install: true, onServicesReady: continueStartup)
+                    } else {
+                        continueStartup()
+                    }
                 }
-            } catch {
-                failure = error.localizedDescription
-            }
-            DispatchQueue.main.async {
-                window.dismiss()
-                finish(failure: failure)
-                if failure == nil { continueStartup() }
             }
         }
     }
 
     /// Opens the setup/recovery checklist from Settings or a recovery action. Safe to call while
     /// dictation services are already running; never starts a second HUD or daemon.
-    /// Owned by the integration lead (onboarding).
-    @MainActor static func presentChecklist() {
-        fputs("VoicePop: setup checklist requested - not implemented yet\n", stderr)
+    static func presentChecklist() {
+        SetupChecklistWindowController.shared.present(install: false, onServicesReady: nil)
     }
 
-    // MARK: - Decide
+    // MARK: - Probes (call off the main thread)
 
-    private static func needsSetup() -> Bool {
-        if !isParakeetCapable(VoxtypeModel.bin) { return true }
-        if !FileManager.default.fileExists(atPath: configPath) { return true }
-        return !VoxtypeModel.installedNames().contains(modelName)
+    static func needsSetup() -> Bool {
+        !engineReady() || !configPresent() || !modelInstalled()
+    }
+
+    static func engineReady() -> Bool {
+        isParakeetCapable(VoxtypeModel.bin)
+    }
+
+    static func configPresent() -> Bool {
+        FileManager.default.fileExists(atPath: configPath)
+    }
+
+    /// The engine may report a packaged variant (e.g. `…-int8-prepacked`) of the default model.
+    static func modelInstalled() -> Bool {
+        VoxtypeModel.installedNames().contains { $0 == modelName || $0.hasPrefix(modelName + "-") }
     }
 
     private static func isParakeetCapable(_ bin: String) -> Bool {
@@ -83,49 +90,57 @@ enum SetupAssistant {
 
     // MARK: - Move to /Applications
 
-    /// Returns true when a relaunch from /Applications has been started.
-    @MainActor private static func relocateIfNeeded() -> Bool {
+    /// Calls `done(true)` when a relaunch from /Applications has been started.
+    private static func relocateIfNeeded(_ done: @escaping (Bool) -> Void) {
         let path = bundleURL.path
-        if path.hasPrefix("/Applications/") { return false }
-        let mustMove = force || needsSetup()
-        if !auto {
-            let alert = NSAlert()
-            alert.messageText = "Move VoicePop to the Applications folder?"
-            alert.informativeText = "VoicePop runs from Applications so it can start at login and keep its permissions."
-            alert.addButton(withTitle: "Move to Applications")
-            if !mustMove { alert.addButton(withTitle: "Not Now") }
-            NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() != .alertFirstButtonReturn { return false }
-        }
-        do {
-            quitOtherInstances()
-            let fm = FileManager.default
-            if fm.fileExists(atPath: installedApp) { try fm.removeItem(atPath: installedApp) }
-            try fm.copyItem(atPath: path, toPath: installedApp)
-            let open = Process()
-            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            open.arguments = ["-n", installedApp]
-            try open.run()
-            open.waitUntilExit()
-            guard open.terminationStatus == 0 else {
-                throw Failure(message: "Could not open VoicePop in Applications.")
+        if path.hasPrefix("/Applications/") { done(false); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let mustMove = force || needsSetup()
+            DispatchQueue.main.async {
+                if !auto {
+                    let alert = NSAlert()
+                    alert.messageText = "Move VoicePop to the Applications folder?"
+                    alert.informativeText = "VoicePop runs from Applications so it can start at login and keep its permissions."
+                    alert.addButton(withTitle: "Move to Applications")
+                    if !mustMove { alert.addButton(withTitle: "Not Now") }
+                    NSApp.activate(ignoringOtherApps: true)
+                    if alert.runModal() != .alertFirstButtonReturn { done(false); return }
+                }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try moveAndRelaunch(from: path)
+                        DispatchQueue.main.async {
+                            fputs("VoicePop setup: moved to \(installedApp), relaunching\n", stderr)
+                            done(true)
+                            NSApp.terminate(nil)
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            let alert = NSAlert()
+                            alert.messageText = "Could not move VoicePop to Applications"
+                            alert.informativeText = "\(error.localizedDescription)\n\nDrag VoicePop.app into Applications yourself, then open it again."
+                            alert.runModal()
+                            done(false)
+                        }
+                    }
+                }
             }
-            guard waitForInstalledInstance(timeout: 5) else {
-                throw Failure(message: "VoicePop did not start from Applications.")
-            }
-            fputs("VoicePop setup: moved to \(installedApp), relaunching\n", stderr)
-            NSApp.terminate(nil)
-            return true
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not move VoicePop to Applications"
-            alert.informativeText = "\(error.localizedDescription)\n\nDrag VoicePop.app into Applications yourself, then open it again."
-            alert.runModal()
-            return false
         }
     }
 
-    @MainActor private static func waitForInstalledInstance(timeout: TimeInterval) -> Bool {
+    /// Off the main thread.
+    private static func moveAndRelaunch(from path: String) throws {
+        quitOtherInstances()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: installedApp) { try fm.removeItem(atPath: installedApp) }
+        try fm.copyItem(atPath: path, toPath: installedApp)
+        _ = try run("/usr/bin/open", ["-n", installedApp])
+        guard waitForInstalledInstance(timeout: 5) else {
+            throw Failure(message: "VoicePop did not start from Applications.")
+        }
+    }
+
+    private static func waitForInstalledInstance(timeout: TimeInterval) -> Bool {
         let me = ProcessInfo.processInfo.processIdentifier
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -135,89 +150,59 @@ enum SetupAssistant {
                         && ($0.bundleURL?.path.hasPrefix("/Applications/") ?? false)
                 }
             if found { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            Thread.sleep(forTimeInterval: 0.1)
         }
         return false
     }
 
-    @MainActor private static func quitOtherInstances() {
+    private static func quitOtherInstances() {
         let me = ProcessInfo.processInfo.processIdentifier
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: PopcornHUDMain.bundleID)
             .filter { $0.processIdentifier != me }
         for app in others { app.terminate() }
         let deadline = Date().addingTimeInterval(3)
         while others.contains(where: { !$0.isTerminated }) && Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            Thread.sleep(forTimeInterval: 0.1)
         }
         for app in others where !app.isTerminated { app.forceTerminate() }
     }
 
-    // MARK: - Steps
+    // MARK: - Steps (call off the main thread)
 
-    private static func perform(report: @escaping (String, Double?) -> Void) throws {
+    static func installEngine(report: @escaping (String, Double?) -> Void) throws {
+        guard !engineReady() else { return }
         guard bundleURL.path.hasPrefix("/Applications/") else {
             throw Failure(message: "Move VoicePop to Applications first, then open it again.")
         }
         let fm = FileManager.default
-
-        if !isParakeetCapable(VoxtypeModel.bin) {
-            report("Installing the Voxtype speech engine…", nil)
-            guard fm.isExecutableFile(atPath: bundledVoxtype) else {
-                throw Failure(message: "This copy of VoicePop has no bundled Voxtype engine. Install Voxtype from https://voxtype.io and open VoicePop again.")
-            }
-            // Copy the pre-signed helper intact; rebuilding its bundle breaks its signature.
-            _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundledHelper])
-            if fm.fileExists(atPath: voxtypeApp) {
-                throw Failure(message: "An incompatible Voxtype app is already installed. Move it out of Applications, then reopen VoicePop to install its bundled speech engine.")
-            }
-            try fm.copyItem(atPath: bundledHelper, toPath: voxtypeApp)
-            guard isParakeetCapable(VoxtypeModel.bin) else {
-                throw Failure(message: "Voxtype did not install to \(voxtypeApp).")
-            }
+        report("Installing the Voxtype speech engine…", nil)
+        guard fm.isExecutableFile(atPath: bundledVoxtype) else {
+            throw Failure(message: "This copy of VoicePop has no bundled Voxtype engine. Install Voxtype from https://voxtype.io, then choose Try Again.")
         }
-
-        if !fm.fileExists(atPath: configPath) {
-            report("Writing dictation settings…", nil)
-            guard let template = Bundle.main.url(forResource: "config", withExtension: "toml"),
-                  var text = try? String(contentsOf: template, encoding: .utf8) else {
-                throw Failure(message: "The settings template is missing from this copy of VoicePop.")
-            }
-            text = text.replacingOccurrences(of: "__VOICEPOP_ROOT__/bin/voxtype-clean", with: installedClean)
-            try fm.createDirectory(atPath: (configPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try text.write(toFile: configPath, atomically: true, encoding: .utf8)
+        // Copy the pre-signed helper intact; rebuilding its bundle breaks its signature.
+        _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundledHelper])
+        if fm.fileExists(atPath: voxtypeApp) {
+            throw Failure(message: "An incompatible Voxtype app is already in Applications. Move it to the Trash, then choose Try Again.")
         }
-
-        if !VoxtypeModel.installedNames().contains(modelName) {
-            report("Downloading the speech model (about 2.4 GB, one time)…", 0)
-            try downloadModel(report: report)
+        try fm.copyItem(atPath: bundledHelper, toPath: voxtypeApp)
+        guard engineReady() else {
+            throw Failure(message: "Voxtype did not install to \(voxtypeApp).")
         }
-
-        report("Starting dictation…", nil)
-        try startDaemon()
     }
 
-    private static func startDaemon() throws {
-        if let script = Bundle.main.url(forResource: "restart-voxtype", withExtension: "sh")?.path {
-            do {
-                _ = try run(script, [])
-                return
-            } catch {
-                fputs("VoicePop setup: restart-voxtype failed (\(error.localizedDescription)); opening Voxtype.app\n", stderr)
-            }
+    static func writeConfigIfMissing() throws {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: configPath) else { return }
+        guard let template = Bundle.main.url(forResource: "config", withExtension: "toml"),
+              var text = try? String(contentsOf: template, encoding: .utf8) else {
+            throw Failure(message: "The settings template is missing from this copy of VoicePop.")
         }
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.main.async {
-            NSWorkspace.shared.openApplication(
-                at: URL(fileURLWithPath: voxtypeApp),
-                configuration: NSWorkspace.OpenConfiguration()
-            )
-            group.leave()
-        }
-        group.wait()
+        text = text.replacingOccurrences(of: "__VOICEPOP_ROOT__/bin/voxtype-clean", with: installedClean)
+        try fm.createDirectory(atPath: (configPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try text.write(toFile: configPath, atomically: true, encoding: .utf8)
     }
 
-    private static func downloadModel(report: @escaping (String, Double?) -> Void) throws {
+    static func downloadModel(report: @escaping (String, Double?) -> Void) throws {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: VoxtypeModel.bin)
         task.arguments = ["setup", "--download", "--activate", "--model", modelName, "--progress-format", "json", "--quiet"]
@@ -264,40 +249,6 @@ enum SetupAssistant {
         }
     }
 
-    // MARK: - Finish
-
-    @MainActor private static func finish(failure: String?) {
-        if let failure {
-            let alert = NSAlert()
-            alert.alertStyle = .critical
-            alert.messageText = "VoicePop setup did not finish"
-            alert.informativeText = failure
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-            return
-        }
-        guard !auto else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        let privacy = NSAlert()
-        privacy.messageText = "One more step: allow Voxtype to type for you"
-        privacy.informativeText = "In System Settings → Privacy & Security, turn on Voxtype under Accessibility and Input Monitoring. Microphone asks on its own the first time you record.\n\nGrant these to Voxtype, not VoicePop."
-        privacy.addButton(withTitle: "Open Privacy & Security")
-        privacy.addButton(withTitle: "Later")
-        if privacy.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-        let keyboard = NSAlert()
-        keyboard.messageText = "Free up the 🌐 key"
-        keyboard.informativeText = "In System Settings → Keyboard, set “Press 🌐 key to” to Do Nothing. Then hold FN, talk, and release to type."
-        keyboard.addButton(withTitle: "Open Keyboard Settings")
-        keyboard.addButton(withTitle: "Done")
-        if keyboard.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
     // MARK: - Helpers
 
     @discardableResult
@@ -325,61 +276,6 @@ enum SetupAssistant {
             throw Failure(message: detail.isEmpty ? "\((bin as NSString).lastPathComponent) \(args.joined(separator: " ")) failed (\(task.terminationStatus))" : detail)
         }
         return stdout
-    }
-}
-
-/// Small floating progress panel shown while setup runs.
-@MainActor
-private final class SetupWindow {
-    private let window: NSWindow
-    private let title = NSTextField(labelWithString: "Setting up VoicePop")
-    private let message = NSTextField(labelWithString: "Checking what is installed…")
-    private let bar = NSProgressIndicator()
-
-    init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 130),
-                          styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = "VoicePop"
-        window.level = .floating
-        window.isReleasedWhenClosed = false
-        let content = NSView(frame: window.contentRect(forFrameRect: window.frame))
-        title.font = .boldSystemFont(ofSize: 15)
-        title.frame = NSRect(x: 24, y: 88, width: 392, height: 22)
-        message.font = .systemFont(ofSize: 13)
-        message.lineBreakMode = .byTruncatingTail
-        message.frame = NSRect(x: 24, y: 58, width: 392, height: 20)
-        bar.style = .bar
-        bar.isIndeterminate = true
-        bar.minValue = 0
-        bar.maxValue = 1
-        bar.frame = NSRect(x: 24, y: 26, width: 392, height: 20)
-        content.addSubview(title)
-        content.addSubview(message)
-        content.addSubview(bar)
-        window.contentView = content
-    }
-
-    func show() {
-        window.center()
-        bar.startAnimation(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    func update(message text: String, fraction: Double?) {
-        message.stringValue = text
-        if let fraction {
-            bar.isIndeterminate = false
-            bar.doubleValue = fraction
-        } else if !bar.isIndeterminate {
-            bar.isIndeterminate = true
-            bar.startAnimation(nil)
-        }
-    }
-
-    func dismiss() {
-        bar.stopAnimation(nil)
-        window.orderOut(nil)
     }
 }
 

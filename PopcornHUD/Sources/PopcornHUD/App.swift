@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateWatcher.start()
         health.start()
         SettingsWindowController.shared.health = health
+        SetupChecklistWindowController.shared.attach(health: health)
 
         let status = StatusItemController()
         status.start(watcher: stateWatcher, health: health)

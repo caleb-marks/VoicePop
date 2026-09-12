@@ -93,9 +93,16 @@ public struct SetupChecklist: Equatable, Sendable {
         evidence.transcriptObserved = true
     }
 
-    /// Text arrived in the practice field. Empty or whitespace-only text is not evidence.
-    public mutating func observePracticeText(_ text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    /// How soon after a transcript text must arrive to count as dictated rather than typed by hand.
+    public static let practiceInsertionWindow: TimeInterval = 5
+
+    /// Text changed in the practice field. It counts as evidence only when non-blank and it follows
+    /// a transcript within `practiceInsertionWindow` seconds (`secondsSinceTranscript`), so typing
+    /// into the field by hand cannot mark permissions complete.
+    public mutating func observePracticeText(_ text: String, secondsSinceTranscript: TimeInterval?) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let age = secondsSinceTranscript, age >= 0, age <= Self.practiceInsertionWindow
+        else { return }
         evidence.practiceInsertionObserved = true
         // Typed text can only come from a completed recording and transcript.
         evidence.transcriptObserved = true
