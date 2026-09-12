@@ -60,6 +60,13 @@ enum SetupAssistant {
         }
     }
 
+    /// Opens the setup/recovery checklist from Settings or a recovery action. Safe to call while
+    /// dictation services are already running; never starts a second HUD or daemon.
+    /// Owned by the integration lead (onboarding).
+    @MainActor static func presentChecklist() {
+        fputs("VoicePop: setup checklist requested - not implemented yet\n", stderr)
+    }
+
     // MARK: - Decide
 
     private static func needsSetup() -> Bool {

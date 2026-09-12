@@ -27,7 +27,6 @@ final class HUDController {
     private var lastAnimMonoMs: UInt64?
     private let tickPending = OSAllocatedUnfairLock(initialState: false)
     private var capsuleFrozen = false
-    private var drawScratch: [PopcornRenderer.KernelDraw] = []
     private var lastPublishMonoMs: UInt64 = 0
     private var mascot: Mascot = .popcorn
 
@@ -47,7 +46,10 @@ final class HUDController {
         beginHide()
     }
 
-    func start(watcher: StateWatcher) {
+    private var health: DictationHealthMonitor?
+
+    func start(watcher: StateWatcher, health: DictationHealthMonitor) {
+        self.health = health
         reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         DistributedNotificationCenter.default.addObserver(
             forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
@@ -76,7 +78,7 @@ final class HUDController {
             }
             if self.presentation != .hidden, let last = self.lastPublish {
                 var updated = last
-                updated.mascot = self.mascot
+                updated.scene.mascot = self.mascot
                 self.lastPublish = updated
                 self.hosting?.rootView = PopcornView(frame: updated)
             }
@@ -137,8 +139,8 @@ final class HUDController {
         if panel == nil { buildPanel() }
         guard let panel else { return }
         let empty = PopcornFrame(
-            opacity: 0, scale: 0.9, bagVisible: 1, heat: 0, mood: 0, kick: 0, bobPhase: 0,
-            label: "", detail: "", presentation: .hidden, reduceMotion: reduceMotion, kernels: []
+            opacity: 0, scale: 0.9,
+            scene: .still(label: "", presentation: .hidden, reduceMotion: reduceMotion, mascot: mascot, bagVisible: 1)
         )
         let host = NSHostingView(rootView: PopcornView(frame: empty))
         host.frame = NSRect(x: 0, y: 0, width: Tunables.cardW, height: Tunables.cardH)
@@ -371,31 +373,13 @@ final class HUDController {
     }
 
     private func publish(from snap: SimSnapshot) {
-        drawScratch.removeAll(keepingCapacity: true)
-        if drawScratch.capacity < Tunables.maxKernels {
-            drawScratch.reserveCapacity(Tunables.maxKernels)
-        }
-        for k in snap.kernels {
-            drawScratch.append(PopcornRenderer.KernelDraw(
-                front: k.front, settled: k.settled,
-                x: CGFloat(k.x), y: CGFloat(k.y), scale: CGFloat(k.scale),
-                rot: CGFloat(k.rot), shape: k.shape, butter: CGFloat(k.butter), alpha: k.alpha
-            ))
-        }
         let frame = PopcornFrame(
             opacity: opacity,
             scale: scale,
-            bagVisible: snap.bagVisible,
-            heat: snap.heat,
-            mood: snap.mood,
-            kick: snap.kick,
-            bobPhase: snap.phase,
-            label: label,
-            detail: detail,
-            presentation: presentation,
-            reduceMotion: reduceMotion,
-            kernels: drawScratch,
-            mascot: mascot
+            scene: PopcornRenderer.SceneInput(
+                snapshot: snap, label: label, detail: detail, presentation: presentation,
+                reduceMotion: reduceMotion, mascot: mascot
+            )
         )
         let kernelsMoving = presentation == .recording || collapseProgress < 1
         if kernelsMoving {
@@ -409,9 +393,8 @@ final class HUDController {
 
     private func publishCapsuleOnly() {
         let frame = PopcornFrame(
-            opacity: 1, scale: reduceMotion ? 1 : 0.65, bagVisible: 0, heat: 0, mood: 0, kick: 0, bobPhase: 0,
-            label: label, detail: "", presentation: .transcribing, reduceMotion: reduceMotion, kernels: [],
-            mascot: mascot
+            opacity: 1, scale: reduceMotion ? 1 : 0.65,
+            scene: .still(label: label, presentation: .transcribing, reduceMotion: reduceMotion, mascot: mascot)
         )
         if frame != lastPublish {
             lastPublish = frame

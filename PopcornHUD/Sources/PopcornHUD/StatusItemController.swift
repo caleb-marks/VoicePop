@@ -29,11 +29,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var modelShortTitle = "Small"
     private var fixLastMenuItem: NSMenuItem?
     private var watcher: StateWatcher?
-    private var suppressTimer: DispatchSourceTimer?
-    private static let voxtypeBin = "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"
-    private static let restartScriptDefaultsKey = "restartVoxtypeScript"
+    private var health: DictationHealthMonitor?
 
-    func start(watcher: StateWatcher) {
+    func start(watcher: StateWatcher, health: DictationHealthMonitor) {
+        self.health = health
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.isVisible = true
         if let button = item.button {
@@ -54,13 +53,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Nothing else launches the daemon after a reboot or logout: bring it up
         // ourselves, or FN does nothing until the user picks "Restart dictation".
-        if !VoxtypeDaemon.isLive(), FileManager.default.isExecutableFile(atPath: Self.voxtypeBin) {
-            fputs("VoicePop: Voxtype daemon not running at launch; starting it\n", stderr)
-            restartVoxtype()
-        }
+        EngineControl.startIfNotRunning()
 
         // Process discovery must not block HUD startup on the main thread.
-        scheduleMenubarSuppressRetries()
+        EngineControl.scheduleMenubarSuppressRetries()
         refreshCachesIfStale(force: true)
         statusMenuItem?.title = statusTitle(for: lastState)
         refreshFixLastItem()
@@ -78,8 +74,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func stop() {
-        suppressTimer?.cancel()
-        suppressTimer = nil
+        EngineControl.cancelMenubarSuppressRetries()
         watcher = nil
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
@@ -276,11 +271,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleRecording() {
-        runVoxtype(["record", "toggle"])
+        EngineControl.record(.toggle)
     }
 
     @objc private func cancelRecording() {
-        runVoxtype(["record", "cancel"])
+        EngineControl.record(.cancel)
     }
 
     @objc private func editConfig() {
@@ -470,108 +465,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    private static func restartScriptPath() -> String? {
-        if let bundled = Bundle.main.url(forResource: "restart-voxtype", withExtension: "sh")?.path,
-           FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
-        }
-        if let custom = UserDefaults.standard.string(forKey: restartScriptDefaultsKey),
-           FileManager.default.isExecutableFile(atPath: custom) {
-            return custom
-        }
-        return nil
-    }
-
     @objc private func restartVoxtype() {
-        if let script = Self.restartScriptPath() {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: script)
-            task.standardOutput = FileHandle.nullDevice
-            task.standardError = FileHandle.nullDevice
-            try? task.run()
-        } else {
-            // Fallback: kill all, reopen app bundle, then suppress emoji tray.
-            let kill = Process()
-            kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            kill.arguments = ["-x", "voxtype-bin"]
-            try? kill.run()
-            kill.waitUntilExit()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                NSWorkspace.shared.openApplication(
-                    at: URL(fileURLWithPath: "/Applications/Voxtype.app"),
-                    configuration: NSWorkspace.OpenConfiguration()
-                )
-                self.scheduleMenubarSuppressRetries()
-            }
-        }
+        EngineControl.restart()
     }
 
     @objc private func quitHUD() {
         NSApp.terminate(nil)
-    }
-
-    private func runVoxtype(_ args: [String]) {
-        let bin = Self.voxtypeBin
-        guard FileManager.default.isExecutableFile(atPath: bin) else { return }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
-    }
-
-    // MARK: - Suppress Voxtype emoji tray
-
-    /// Voxtype AppLaunch = daemon child + menubar parent. Kill parent only.
-    static func suppressVoxtypeMenubar() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
-        task.arguments = ["-axo", "pid=,args="]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-        } catch {
-            return
-        }
-        // Drain while ps is running: waiting first can deadlock on a full pipe.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        guard let out = String(data: data, encoding: .utf8) else { return }
-
-        for line in out.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.contains("voxtype-bin") else { continue }
-            let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            guard let pidStr = parts.first, let pid = Int32(pidStr) else { continue }
-            let args = parts.count > 1 ? String(parts[1]) : ""
-            // Keep daemon and one-shot CLI (`record`, `setup`, …).
-            // Kill bare AppLaunch parent (`…/voxtype-bin`) and explicit `menubar`.
-            let isBareAppLaunch = args.hasSuffix("/voxtype-bin") || args == "voxtype-bin"
-            let isMenubar = args.contains("voxtype-bin menubar")
-            if isBareAppLaunch || isMenubar {
-                kill(pid, SIGTERM)
-            }
-        }
-    }
-
-    private func scheduleMenubarSuppressRetries() {
-        suppressTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        // Voxtype may start after us; retry a few times then once more late.
-        var remaining = 8
-        timer.schedule(deadline: .now() + 0.5, repeating: 1.0)
-        timer.setEventHandler { [weak self] in
-            Self.suppressVoxtypeMenubar()
-            remaining -= 1
-            if remaining <= 0 {
-                timer.cancel()
-                DispatchQueue.main.async { self?.suppressTimer = nil }
-            }
-        }
-        suppressTimer = timer
-        timer.resume()
     }
 }

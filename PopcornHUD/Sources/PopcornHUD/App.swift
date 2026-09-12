@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: HUDController?
     private var statusItem: StatusItemController?
     private let stateWatcher = StateWatcher()
+    private lazy var health = DictationHealthMonitor(watcher: stateWatcher)
     private var previousApp: NSRunningApplication?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -46,13 +47,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = StatusItemIcon.dockImage()
 
         stateWatcher.start()
+        health.start()
+        SettingsWindowController.shared.health = health
 
         let status = StatusItemController()
-        status.start(watcher: stateWatcher)
+        status.start(watcher: stateWatcher, health: health)
         statusItem = status
 
         controller = HUDController()
-        controller?.start(watcher: stateWatcher)
+        controller?.start(watcher: stateWatcher, health: health)
         fputs("VoicePop menu bar item ready\n", stderr)
         VoxtypeWarmer.shared.ensureWarm()
         yieldFocus()
