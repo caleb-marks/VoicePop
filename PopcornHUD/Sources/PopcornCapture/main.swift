@@ -17,6 +17,8 @@ struct PopcornCapture {
         let prefix = mascot == .beagle ? "beagle-" : "popcorn-"
         try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
+        // Popcorn keeps the existing 2× documentation stills and also emits native 1× copies;
+        // beagle artifacts retain their established native scale.
         let scale: CGFloat = mascot == .beagle ? 1 : 2
 
         let segments: [(label: String, seconds: Double, peak: Float, accents: Bool)] = [
@@ -31,6 +33,7 @@ struct PopcornCapture {
         sim.allowSpawn = true
         var mono: UInt64 = 0
         var frames: [(String, NSImage)] = []
+        var peakKernelCount = 0
 
         let t0 = CFAbsoluteTimeGetCurrent()
         for (label, seconds, peak, accents) in segments {
@@ -44,6 +47,7 @@ struct PopcornCapture {
                     fresh = (i % 2 == 0)
                 }
                 let snap = sim.advance(toMonoMs: mono, peak: peak, peakFresh: fresh)
+                peakKernelCount = max(peakKernelCount, sim.kernels.count)
                 if i == steps - 1 || (label == "loud" && i == steps / 2) {
                     let frame = CaptureFrame(
                         heat: snap.heat, mood: snap.mood, kick: snap.kick, phase: snap.phase,
@@ -54,6 +58,9 @@ struct PopcornCapture {
                         let actual = render(frame: frame, bg: bg, scale: scale)
                         let actualName = "\(prefix)\(label)-\(bgName).png"
                         save(actual, to: "\(outDir)/\(actualName)")
+                        if mascot == .popcorn {
+                            save(render(frame: frame, bg: bg, scale: 1), to: "\(outDir)/\(prefix)\(label)-\(bgName)-native1x.png")
+                        }
                         frames.append((actualName, actual))
                         if mascot == .beagle {
                             save(render(frame: frame, bg: bg, scale: 4), to: "\(outDir)/\(prefix)\(label)-\(bgName)-review4x.png")
@@ -77,6 +84,16 @@ struct PopcornCapture {
                 }
             }
             _ = quietFrame
+        } else {
+            let reduced = CaptureFrame(heat: 0.28, mood: 0.28, kick: 0, phase: 0, kernels: [], reduceMotion: true, mascot: .popcorn)
+            let transcribing = CaptureFrame(heat: 0, mood: 0, kick: 0, phase: 0, kernels: [], reduceMotion: true, mascot: .popcorn, presentation: .transcribing, label: "Transcribing…")
+            for (name, frame) in [("loud-reducemotion", reduced), ("transcribing", transcribing)] {
+                for bgName in ["light", "dark"] {
+                    let bg = bgName == "dark" ? NSColor.black : NSColor.white
+                    save(render(frame: frame, bg: bg, scale: 1), to: "\(outDir)/popcorn-\(name)-\(bgName).png")
+                    save(render(frame: frame, bg: bg, scale: 4), to: "\(outDir)/popcorn-\(name)-\(bgName)-review4x.png")
+                }
+            }
         }
 
         let loud = CaptureFrame(
@@ -121,6 +138,18 @@ struct PopcornCapture {
             }
             _ = label
         }
+        // Keep the README hero honest: the deterministic demo ends with one second of the
+        // transcribing state, using the same capsule baseline as the live renderer.
+        let transcribingMovieFrame = CaptureFrame(
+            heat: 0, mood: 0, kick: 0, phase: 0, kernels: [], reduceMotion: true,
+            mascot: mascot, presentation: .transcribing, label: "Transcribing…"
+        )
+        for _ in 0..<60 {
+            let img = render(frame: transcribingMovieFrame, bg: NSColor(calibratedWhite: 0.92, alpha: 1), scale: 1)
+            let path = String(format: "%@/f_%04d.png", movieDir, frameIdx)
+            save(img, to: path)
+            frameIdx += 1
+        }
         let mp4 = "\(outDir)/\(prefix)polish.mp4"
         let ffmpeg = Process()
         ffmpeg.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -133,24 +162,47 @@ struct PopcornCapture {
         ffmpeg.standardError = FileHandle.nullDevice
         try? ffmpeg.run()
         ffmpeg.waitUntilExit()
+        if mascot == .popcorn {
+            let gif = Process()
+            gif.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            gif.arguments = [
+                "ffmpeg", "-y", "-framerate", "60", "-i", "\(movieDir)/f_%04d.png",
+                "-vf", "fps=16,split[s0][s1];[s0]palettegen=max_colors=192:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer",
+                "\(outDir)/demo-tub.gif",
+            ]
+            gif.standardOutput = FileHandle.nullDevice
+            gif.standardError = FileHandle.nullDevice
+            try? gif.run()
+            gif.waitUntilExit()
+        }
         try? FileManager.default.removeItem(atPath: movieDir)
+
+        let specialArtifacts = mascot == .beagle
+            ? """
+              - `beagle-quiet-reducemotion-light.png` / `beagle-quiet-reducemotion-dark.png`
+              - `beagle-loud-reducemotion-light.png` / `beagle-loud-reducemotion-dark.png` (geometry must match quiet)
+              - `beagle-transcribing-light.png` / `beagle-transcribing-dark.png` (capsule only)
+              """
+            : """
+              - `popcorn-loud-reducemotion-light.png` / `popcorn-loud-reducemotion-dark.png`
+              - `popcorn-transcribing-light.png` / `popcorn-transcribing-dark.png` (capsule only)
+              - `popcorn-*-native1x.png` (native-scale copies)
+              """
 
         let report = """
         # \(mascot == .beagle ? "Nandor" : "Popcorn") voice-polish verification - \(ISO8601DateFormatter().string(from: Date()))
 
         Production HUD remains Canvas-only. \(mascot == .beagle ? "Beagle" : "Popcorn") captures use the
-        fixed 260×420 point scene at actual size and 4× review scale; the \(mascot == .beagle ? "beagle path uses only dog geometry" : "popcorn path uses only tub and kernel geometry") and restrained motion.
+        fixed 260×420 point scene; primary stills use \(String(format: "%.0f", scale))× documentation scale with native 1× copies where applicable. The \(mascot == .beagle ? "beagle path uses only dog geometry" : "popcorn path uses only tub and kernel geometry") and restrained motion.
 
         ## Checks
 
-        - `swift test --package-path PopcornHUD`: KernelArt hull/lobes + prior physics tests.
-        - `swift build --package-path PopcornHUD -c release`: passes.
-        - Dated 2026-09-06: then installed `bin/PopcornHUD` + LaunchAgent. Superseded by VoicePop.app.
+        - Capture command: `PopcornCapture <output-directory> \(mascot == .beagle ? "beagle" : "popcorn")`.
         - Seed 2026 sequence: quiet 0.035 (2 s), normal 0.12 (2 s), loud 0.28 (3 s),
           accents (2 s), silence (1 s). Light and dark backgrounds.
-        - Peak kernel count in capture: \(sim.kernels.count) (cap 120).
-        - Full sequence wall time (sim only path above): \(String(format: "%.1f", simMs)) ms.
-        - Offscreen Canvas renders (2× light+dark pair): median \(String(format: "%.2f", median)) ms,
+        - Peak kernel count in capture: \(peakKernelCount) (cap \(Tunables.maxKernels)).
+        - Sequence generation wall time (simulation, still rendering, and PNG writes): \(String(format: "%.1f", simMs)) ms.
+        - Offscreen Canvas renders (\(String(format: "%.0f", scale))× light+dark pair): median \(String(format: "%.2f", median)) ms,
           95th \(String(format: "%.2f", p95)) ms. These are ImageRenderer measurements,
           **not** live display/compositor frame timings and **not** microphone-to-screen latency.
         - Packet-to-render path is one display tick after `consumePeak` (held level between
@@ -158,16 +210,15 @@ struct PopcornCapture {
 
         ## Visual artifacts
 
-        - `\(prefix)quiet-light.png` / `\(prefix)quiet-dark.png` (actual size)
+        - `\(prefix)quiet-light.png` / `\(prefix)quiet-dark.png` (\(String(format: "%.0f", scale))× documentation stills)
         - `\(prefix)normal-light.png` / `\(prefix)normal-dark.png`
         - `\(prefix)loud-light.png` / `\(prefix)loud-dark.png`
         - `\(prefix)accents-light.png` / `\(prefix)accents-dark.png`
         - `\(prefix)silence-light.png` / `\(prefix)silence-dark.png`
-        - `beagle-quiet-reducemotion-light.png` / `beagle-quiet-reducemotion-dark.png`
-        - `beagle-loud-reducemotion-light.png` / `beagle-loud-reducemotion-dark.png` (geometry must match quiet)
-        - `beagle-transcribing-light.png` / `beagle-transcribing-dark.png` (capsule only)
+        \(specialArtifacts)
         - `kernel-preview.png` (legacy popcorn route)
-        - `\(prefix)polish.mp4`: 60 fps deterministic input demo - **not** microphone footage.
+        - `\(prefix)polish.mp4`: 60 fps deterministic input demo ending in one second of transcribing - **not** microphone footage.
+        \(mascot == .popcorn ? "- `demo-tub.gif`: 16 fps README hero derived from the same deterministic frames." : "")
 
         ## Still required (live)
 
@@ -213,7 +264,7 @@ struct PopcornCapture {
             reduceMotion: frame.reduceMotion,
             bagVisible: 1,
             kernels: draws,
-            showRecordingDot: true,
+            showRecordingDot: frame.presentation == .recording,
             mood: frame.mood,
            
             mascot: frame.mascot

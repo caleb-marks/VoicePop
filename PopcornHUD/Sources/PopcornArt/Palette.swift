@@ -15,6 +15,19 @@ public enum Palette {
     public static let bagRed = NSColor(srgbRed: 0xC6 / 255, green: 0x36 / 255, blue: 0x2F / 255, alpha: 1)
     public static let bagCream = NSColor(srgbRed: 0xF3 / 255, green: 0xE3 / 255, blue: 0xC3 / 255, alpha: 1)
     public static let bagInterior = NSColor(srgbRed: 0x4A / 255, green: 0x18 / 255, blue: 0x14 / 255, alpha: 1)
+
+    // Popcorn paperware tokens are intentionally separate from the legacy bag/beagle capsule
+    // colors.  The mascot can evolve without changing the dog's established status chrome.
+    public static let popcornPaper = NSColor(srgbRed: 0xF5 / 255, green: 0xED / 255, blue: 0xDC / 255, alpha: 1)
+    public static let popcornPaperLight = NSColor(srgbRed: 0xFF / 255, green: 0xF9 / 255, blue: 0xEC / 255, alpha: 1)
+    public static let popcornPaperShade = NSColor(srgbRed: 0xD9 / 255, green: 0xC8 / 255, blue: 0xAA / 255, alpha: 1)
+    public static let popcornInk = NSColor(srgbRed: 0x97 / 255, green: 0x3D / 255, blue: 0x3D / 255, alpha: 1)
+    public static let popcornInkShade = NSColor(srgbRed: 0x67 / 255, green: 0x27 / 255, blue: 0x2C / 255, alpha: 1)
+    public static let popcornInterior = NSColor(srgbRed: 0x59 / 255, green: 0x42 / 255, blue: 0x38 / 255, alpha: 1)
+    public static let popcornFineEdge = NSColor(srgbRed: 0xBB / 255, green: 0xA7 / 255, blue: 0x8A / 255, alpha: 1)
+    public static let popcornStatusSurface = NSColor(srgbRed: 0xFA / 255, green: 0xF7 / 255, blue: 0xF1 / 255, alpha: 1)
+    public static let popcornStatusText = NSColor(srgbRed: 0x34 / 255, green: 0x2F / 255, blue: 0x2C / 255, alpha: 1)
+    public static let popcornRecordingDot = NSColor(srgbRed: 0xB4 / 255, green: 0x48 / 255, blue: 0x46 / 255, alpha: 1)
 }
 
 /// SwiftUI mirrors of `Palette`, allocated once. `Color(nsColor:)` is a value conversion, so a
@@ -32,6 +45,16 @@ public enum PaletteUI {
     public static let bagRed = Color(nsColor: Palette.bagRed)
     public static let bagCream = Color(nsColor: Palette.bagCream)
     public static let bagInterior = Color(nsColor: Palette.bagInterior)
+    public static let popcornPaper = Color(nsColor: Palette.popcornPaper)
+    public static let popcornPaperLight = Color(nsColor: Palette.popcornPaperLight)
+    public static let popcornPaperShade = Color(nsColor: Palette.popcornPaperShade)
+    public static let popcornInk = Color(nsColor: Palette.popcornInk)
+    public static let popcornInkShade = Color(nsColor: Palette.popcornInkShade)
+    public static let popcornInterior = Color(nsColor: Palette.popcornInterior)
+    public static let popcornFineEdge = Color(nsColor: Palette.popcornFineEdge)
+    public static let popcornStatusSurface = Color(nsColor: Palette.popcornStatusSurface)
+    public static let popcornStatusText = Color(nsColor: Palette.popcornStatusText)
+    public static let popcornRecordingDot = Color(nsColor: Palette.popcornRecordingDot)
 
     public static let kernelBase = Gradient(colors: [puffWhite, puffCream, puffUnderside])
     public static let lobeHighlight = Gradient(colors: [.white.opacity(0.50), .clear])
