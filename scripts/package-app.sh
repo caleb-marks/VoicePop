@@ -50,8 +50,10 @@ VOX_ENGINES="$( [[ -x "$VOX_SRC" ]] && "$VOX_SRC" info engines 2>/dev/null || tr
 if grep -q 'compiled  parakeet' <<<"$VOX_ENGINES"; then
   [[ -f "$VOX_PROVENANCE" ]] \
     || { echo "ERROR: missing engine build provenance: $VOX_PROVENANCE" >&2; exit 1; }
-  cp "$VOX_SRC" "$CONTENTS/Resources/voxtype-bin"
-  chmod +x "$CONTENTS/Resources/voxtype-bin"
+  mkdir -p "$CONTENTS/Helpers/Voxtype.app/Contents/MacOS"
+  cp "$ROOT/app/Voxtype-Info.plist" "$CONTENTS/Helpers/Voxtype.app/Contents/Info.plist"
+  cp "$VOX_SRC" "$CONTENTS/Helpers/Voxtype.app/Contents/MacOS/voxtype-bin"
+  chmod +x "$CONTENTS/Helpers/Voxtype.app/Contents/MacOS/voxtype-bin"
   cp "$ROOT/LICENSE" "$CONTENTS/Resources/VOICEPOP-LICENSE"
   cp "$ROOT/release/VOXTYPE-LICENSE" "$CONTENTS/Resources/VOXTYPE-LICENSE"
   cp "$VOX_PROVENANCE" "$CONTENTS/Resources/VOXTYPE-BUILD.txt"
@@ -76,15 +78,23 @@ if [[ -n "$SIGN_ID" && "$SIGN_ID" != "-" ]]; then
     echo "ERROR: signing identity not found in keychain: $SIGN_ID" >&2
     exit 1
   fi
-  if [[ "$SIGN_ID" == Apple\ Development:* ]]; then
+  if [[ "$SIGN_ID" != Developer\ ID\ Application:* ]]; then
     echo "ERROR: refusing to sign a release with an Apple Development identity (embeds the Apple ID email). Use a Developer ID identity or leave VOICEPOP_SIGN_IDENTITY unset for ad-hoc." >&2
     exit 1
   fi
-  codesign --force --deep --timestamp --sign "$SIGN_ID" "$APP"
+  SIGN_ARGS=(--force --timestamp --options runtime --sign "$SIGN_ID")
 else
-  echo "==> Ad-hoc signature (set VOICEPOP_SIGN_IDENTITY to a Developer ID identity to sign for distribution)"
-  codesign --force --deep --sign - "$APP"
+  echo "==> Ad-hoc development build (not for public distribution)"
+  SIGN_ARGS=(--force --sign -)
 fi
+# Sign nested code first; --deep is used only for verification.
+HELPER="$CONTENTS/Helpers/Voxtype.app"
+if [[ -d "$HELPER" ]]; then
+  codesign "${SIGN_ARGS[@]}" --entitlements "$ROOT/app/Voxtype.entitlements" "$HELPER"
+fi
+codesign "${SIGN_ARGS[@]}" "$CONTENTS/MacOS/voxtype-clean"
+codesign "${SIGN_ARGS[@]}" "$APP"
+codesign --verify --deep --strict "$APP"
 
 echo "OK: $APP"
 defaults read "$CONTENTS/Info" CFBundleIdentifier

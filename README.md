@@ -37,9 +37,12 @@ A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, 
 
 ## Install
 
+**[Download for Mac — Apple Silicon](https://github.com/caleb-marks/VoicePop/releases/download/v1.1.3/VoicePop-1.1.3.dmg)**
+
+
 Apple Silicon, macOS 13+.
 
-1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) - `.dmg` (drag to Applications) or `-macos-arm64.zip` (`./install.sh`). First launch must run from Applications; if you open the DMG copy, VoicePop will move itself there.
+1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) - `.dmg` (drag to Applications). First launch must run from Applications; if you open the DMG copy, VoicePop will move itself there.
 2. Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (~2.4 GB, once), and walks you through the two macOS switches it needs: **Accessibility** and **Input Monitoring** for Voxtype.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
@@ -153,3 +156,5 @@ swift test --package-path PopcornHUD
 ## Credits
 
 Speech engine: [Voxtype](https://voxtype.io) by peteonrails (MIT). ASR models: NVIDIA Parakeet, OpenAI Whisper. VoicePop is MIT - see [LICENSE](LICENSE).
+
+Release maintainers: see [Mac distribution](docs/mac-distribution.md) for signing, notarization, and the stable download asset.

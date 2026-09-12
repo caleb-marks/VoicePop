@@ -21,7 +21,8 @@ enum SetupAssistant {
 
     private static var bundleURL: URL { Bundle.main.bundleURL }
     private static var isAppBundle: Bool { bundleURL.pathExtension == "app" }
-    private static var bundledVoxtype: String { bundleURL.appendingPathComponent("Contents/Resources/voxtype-bin").path }
+    private static var bundledHelper: String { bundleURL.appendingPathComponent("Contents/Helpers/Voxtype.app").path }
+    private static var bundledVoxtype: String { (bundledHelper as NSString).appendingPathComponent("Contents/MacOS/voxtype-bin") }
     private static var installedClean: String { (installedApp as NSString).appendingPathComponent("Contents/MacOS/voxtype-clean") }
     private static var configPath: String {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/voxtype/config.toml").path
@@ -94,7 +95,6 @@ enum SetupAssistant {
             let fm = FileManager.default
             if fm.fileExists(atPath: installedApp) { try fm.removeItem(atPath: installedApp) }
             try fm.copyItem(atPath: path, toPath: installedApp)
-            try clearQuarantine(installedApp)
             let open = Process()
             open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             open.arguments = ["-n", installedApp]
@@ -158,9 +158,12 @@ enum SetupAssistant {
             guard fm.isExecutableFile(atPath: bundledVoxtype) else {
                 throw Failure(message: "This copy of VoicePop has no bundled Voxtype engine. Install Voxtype from https://voxtype.io and open VoicePop again.")
             }
-            try clearQuarantine(bundledVoxtype)
-            _ = try run(bundledVoxtype, ["setup", "app-bundle"])
-            try clearQuarantine(voxtypeApp)
+            // Copy the pre-signed helper intact; rebuilding its bundle breaks its signature.
+            _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundledHelper])
+            if fm.fileExists(atPath: voxtypeApp) {
+                throw Failure(message: "An incompatible Voxtype app is already installed. Move it out of Applications, then reopen VoicePop to install its bundled speech engine.")
+            }
+            try fm.copyItem(atPath: bundledHelper, toPath: voxtypeApp)
             guard isParakeetCapable(VoxtypeModel.bin) else {
                 throw Failure(message: "Voxtype did not install to \(voxtypeApp).")
             }
@@ -289,31 +292,6 @@ enum SetupAssistant {
     }
 
     // MARK: - Helpers
-
-    private static func clearQuarantine(_ path: String) throws {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        task.arguments = ["-dr", "com.apple.quarantine", path]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try task.run()
-        task.waitUntilExit()
-        // xattr -d exits non-zero when the attribute is already absent; that is not a failure.
-        guard !hasQuarantine(path) else {
-            throw Failure(message: "Could not clear quarantine on \((path as NSString).lastPathComponent).")
-        }
-    }
-
-    private static func hasQuarantine(_ path: String) -> Bool {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        task.arguments = ["-p", "com.apple.quarantine", path]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
-        task.waitUntilExit()
-        return task.terminationStatus == 0
-    }
 
     @discardableResult
     private static func run(_ bin: String, _ args: [String]) throws -> String {

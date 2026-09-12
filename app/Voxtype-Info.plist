@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>voxtype-bin</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.voxtype.daemon</string>
+    <key>CFBundleName</key>
+    <string>Voxtype</string>
+    <key>CFBundleDisplayName</key>
+    <string>Voxtype</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.1</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Voxtype needs microphone access for speech-to-text transcription.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Voxtype needs accessibility access to type transcribed text.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Voxtype monitors keyboard input to detect your push-to-talk hotkey.</string>
+</dict>
+</plist>
