@@ -277,6 +277,7 @@ final class LearningTests: XCTestCase {
     }
     func testHistoryAppendLastAndCorrectionsRecent() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voicepop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
         let h = dir.appendingPathComponent("history.jsonl"), rot = dir.appendingPathComponent("history.1.jsonl")
         HistoryStore.append(HistoryEntry(ts: "1", app: "A", style: "auto", raw: "a", rules: "A", out: "A", llm: false), to: h, rotated: rot)
         HistoryStore.append(HistoryEntry(ts: "2", app: "B", style: "casual", raw: "b", rules: "b", out: "b", llm: false), to: h, rotated: rot)
@@ -284,6 +285,27 @@ final class LearningTests: XCTestCase {
         let c = dir.appendingPathComponent("corrections.jsonl")
         for i in 0..<10 { CorrectionStore.append(CorrectionEntry(ts: "\(i)", app: "A", style: "formal", typed: "t\(i)", corrected: "c\(i)"), to: c) }
         XCTAssertEqual(CorrectionStore.recent(limit: 3, from: c).map(\.ts), ["7", "8", "9"])
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: h.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: c.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+
+        try Data("rotated".utf8).write(to: rot)
+        try HistoryStore.clear(active: h, rotated: rot)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: h.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: c.path), "clearing history must retain saved corrections")
+    }
+
+    func testAtomicStateWritesAreOwnerOnly() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voicepop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let style = dir.appendingPathComponent("style.json")
+        let replacements = dir.appendingPathComponent("replacements.json")
+        try StylePrefs.default.save(to: style)
+        try Replacements().save(to: replacements)
+        for url in [style, replacements] {
+            XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        }
     }
 
     func testAlignmentIgnoresCaseAndPunctuation() {
@@ -315,6 +337,45 @@ final class LearningTests: XCTestCase {
 }
 
 final class OllamaGuardrailTests: XCTestCase {
+    func testOnlyCanonicalLoopbackEndpointsAreAccepted() {
+        let accepted = [
+            "http://localhost:11434",
+            "http://localhost.:11434",
+            "https://127.0.0.1",
+            "http://127.255.12.9:8080",
+            "http://[::1]:11434",
+        ]
+        for value in accepted {
+            XCTAssertTrue(OllamaClient.isLoopbackURL(URL(string: value)!), value)
+        }
+
+        let rejected = [
+            "http://example.com",
+            "http://localhost.example.com",
+            "http://127.0.0.1.example.com",
+            "http://0177.0.0.1",
+            "http://2130706433",
+            "ftp://127.0.0.1",
+            "http://user@127.0.0.1",
+            "http://[::2]",
+        ]
+        for value in rejected {
+            XCTAssertFalse(OllamaClient.isLoopbackURL(URL(string: value)!), value)
+        }
+    }
+
+    func testAllOllamaPathsAndRedirectsStayOnLoopback() {
+        let endpoint = "http://[::1]:11434/base"
+        XCTAssertEqual(OllamaClient.requestURL(endpoint: endpoint, path: "/api/tags")?.absoluteString, "http://[::1]:11434/base/api/tags")
+        XCTAssertNil(OllamaClient.requestURL(endpoint: "https://example.com", path: "/api/chat"))
+        XCTAssertNil(OllamaClient.requestURL(endpoint: "http://localhost:11434?next=remote", path: "/api/chat"))
+
+        let local = URLRequest(url: URL(string: "http://127.0.0.1:11434/api/chat")!)
+        let remote = URLRequest(url: URL(string: "https://example.com/collect")!)
+        XCTAssertNotNil(OllamaClient.guardedRedirect(local))
+        XCTAssertNil(OllamaClient.guardedRedirect(remote))
+    }
+
     func testRejectsMultilineAndFences() {
         XCTAssertFalse(OllamaClient.validate(input: "hello there friend", output: "Hello\nthere, friend.", glossary: []))
         XCTAssertFalse(OllamaClient.validate(input: "hello there friend", output: "```Hello there, friend.```", glossary: []))

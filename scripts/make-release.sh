@@ -5,13 +5,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VOX_BIN="${VOXTYPE_BIN:-/Applications/Voxtype.app/Contents/MacOS/voxtype-bin}"
+VOX_PROVENANCE="${VOXTYPE_PROVENANCE:-$(dirname "$VOX_BIN")/VOXTYPE-BUILD.txt}"
 
 [[ -x "$VOX_BIN" ]] || { echo "ERROR: $VOX_BIN missing (set VOXTYPE_BIN)" >&2; exit 1; }
+[[ -f "$VOX_PROVENANCE" ]] \
+  || { echo "ERROR: $VOX_PROVENANCE missing (set VOXTYPE_PROVENANCE)" >&2; exit 1; }
 ENGINES="$("$VOX_BIN" info engines 2>/dev/null || true)"
 grep -q 'compiled  parakeet' <<<"$ENGINES" \
   || { echo "ERROR: $VOX_BIN is not a Parakeet-capable build" >&2; exit 1; }
 
-"$ROOT/scripts/package-app.sh" >/dev/null
+VOXTYPE_BIN="$VOX_BIN" VOXTYPE_PROVENANCE="$VOX_PROVENANCE" \
+  "$ROOT/scripts/package-app.sh" >/dev/null
 [[ -x "$ROOT/dist/VoicePop.app/Contents/MacOS/voxtype-clean" ]] \
   || { echo "ERROR: voxtype-clean not bundled in dist/VoicePop.app" >&2; exit 1; }
 
@@ -25,6 +29,9 @@ mkdir -p "$STAGE"
 cp -R "$ROOT/dist/VoicePop.app" "$STAGE/VoicePop.app"
 cp "$VOX_BIN" "$STAGE/voxtype-bin"
 cp "$ROOT/release/install.sh" "$ROOT/release/README.txt" "$STAGE/"
+cp "$ROOT/LICENSE" "$STAGE/LICENSE"
+cp "$ROOT/release/VOXTYPE-LICENSE" "$STAGE/VOXTYPE-LICENSE"
+cp "$VOX_PROVENANCE" "$STAGE/VOXTYPE-BUILD.txt"
 chmod +x "$STAGE/install.sh" "$STAGE/voxtype-bin"
 
 codesign --verify --deep --strict "$STAGE/VoicePop.app"

@@ -8,7 +8,7 @@ Swift Package Manager, no Xcode project.
 
 ```bash
 swift build --package-path PopcornHUD
-swift test  --package-path PopcornHUD   # 57 tests
+swift test --package-path PopcornHUD
 ```
 
 Requires macOS 13+ on Apple Silicon and Swift 5.9.

@@ -5,14 +5,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        VoicePop runs entirely on your Mac. Please do not paste transcript text you would not want public.
+        VoicePop processes speech locally. Optional polish sends text only to a loopback Ollama service. Please do not paste transcript text you would not want public.
 
   - type: input
     id: version
     attributes:
       label: VoicePop version
       description: Menu bar → About, or the version of the release you downloaded.
-      placeholder: "1.1.2"
+      placeholder: "1.1.3"
     validations:
       required: true
 

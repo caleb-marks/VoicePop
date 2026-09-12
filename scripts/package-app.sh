@@ -9,7 +9,9 @@ CONTENTS="$APP/Contents"
 SIGN_ID="${VOICEPOP_SIGN_IDENTITY:-}"
 
 echo "==> Building PopcornHUD (release)"
-(cd "$ROOT/PopcornHUD" && swift build -c release)
+(cd "$ROOT/PopcornHUD" && swift build -c release \
+  -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/usr/src/voicepop" \
+  -Xswiftc -debug-prefix-map -Xswiftc "$ROOT=/usr/src/voicepop")
 
 HUD="$ROOT/PopcornHUD/.build/release/PopcornHUD"
 CLEAN="$ROOT/PopcornHUD/.build/release/voxtype-clean"
@@ -43,10 +45,16 @@ if [[ -x "$ROOT/bin/voxtype-clean" ]]; then
 fi
 cp "$ROOT/config/config.toml" "$CONTENTS/Resources/config.toml"
 VOX_SRC="${VOXTYPE_BIN:-/Applications/Voxtype.app/Contents/MacOS/voxtype-bin}"
+VOX_PROVENANCE="${VOXTYPE_PROVENANCE:-$(dirname "$VOX_SRC")/VOXTYPE-BUILD.txt}"
 VOX_ENGINES="$( [[ -x "$VOX_SRC" ]] && "$VOX_SRC" info engines 2>/dev/null || true )"
 if grep -q 'compiled  parakeet' <<<"$VOX_ENGINES"; then
+  [[ -f "$VOX_PROVENANCE" ]] \
+    || { echo "ERROR: missing engine build provenance: $VOX_PROVENANCE" >&2; exit 1; }
   cp "$VOX_SRC" "$CONTENTS/Resources/voxtype-bin"
   chmod +x "$CONTENTS/Resources/voxtype-bin"
+  cp "$ROOT/LICENSE" "$CONTENTS/Resources/VOICEPOP-LICENSE"
+  cp "$ROOT/release/VOXTYPE-LICENSE" "$CONTENTS/Resources/VOXTYPE-LICENSE"
+  cp "$VOX_PROVENANCE" "$CONTENTS/Resources/VOXTYPE-BUILD.txt"
 else
   echo "WARNING: no Parakeet-capable voxtype-bin at $VOX_SRC; app will not be able to self-install Voxtype (set VOXTYPE_BIN)" >&2
 fi

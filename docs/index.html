@@ -124,7 +124,7 @@ footer p{margin:0 0 7px}
     </div>
     <p class="req">Apple Silicon · macOS 13+ · free and open source</p>
     <div class="badges">
-      <span class="badge">0 cloud calls</span>
+      <span class="badge">Local speech recognition</span>
       <span class="badge">No subscription</span>
       <span class="badge">No account</span>
       <span class="badge">MIT licensed</span>
@@ -135,8 +135,8 @@ footer p{margin:0 0 7px}
 <section>
   <div class="wrap">
     <h2><span class="n">01</span>Why it exists</h2>
-    <p class="lede">Built-in macOS dictation is cloud-backed, punctuates badly, and gives no honest signal that it is listening. VoicePop does three things Apple's version does not do together: <b>stay on the device</b>, <b>start typing in under a second</b>, and <b>look like it is listening</b> so you are not talking into a void.</p>
-    <p class="lede">It is a menu-bar app wrapping a local speech engine (<a href="https://voxtype.io">Voxtype</a>, MIT, by peteonrails) plus the parts that make dictation usable day to day: a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.</p>
+    <p class="lede">VoicePop brings hold-to-talk dictation, a responsive visual indicator, per-app writing styles, and learned corrections to macOS. It uses local speech recognition and offers optional text polishing through a loopback-only Ollama connection.</p>
+    <p class="lede">It is a menu-bar app wrapping a local speech engine (<a href="https://voxtype.io">Voxtype</a>, MIT, by peteonrails) plus a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.</p>
   </div>
 </section>
 
@@ -150,7 +150,7 @@ footer p{margin:0 0 7px}
       </div>
       <div class="card">
         <h3>Local speech</h3>
-        <p>NVIDIA Parakeet <code>tdt-0.6b-v3-int8</code> by default, Whisper Tiny through Large-turbo as fallbacks. No network calls in the dictation path.</p>
+        <p>NVIDIA Parakeet <code>tdt-0.6b-v3-int8</code> by default, Whisper Tiny through Large-turbo as fallbacks. Audio and speech recognition remain on the Mac.</p>
       </div>
       <div class="card">
         <h3>A HUD that reacts to you</h3>
@@ -166,7 +166,7 @@ footer p{margin:0 0 7px}
       </div>
       <div class="card">
         <h3>Optional on-device polish</h3>
-        <p>Formal style can run through a local LLM (<code>qwen3.5:4b-mlx</code> via Ollama). If it is slow or down, rules output ships unchanged inside a 5 s budget.</p>
+        <p>Formal style can send transcript text to Ollama over a loopback-only connection. VoicePop blocks remote endpoints and non-loopback redirects; the Ollama service and model remain under your control.</p>
       </div>
     </div>
   </div>
@@ -245,7 +245,7 @@ footer p{margin:0 0 7px}
 <section>
   <div class="wrap">
     <h2><span class="n">06</span>What it keeps, and where</h2>
-    <p class="lede">State is plain JSON in <code>~/.config/voicepop/</code> — <code>style.json</code>, <code>history.jsonl</code> (rotates at 1&nbsp;MiB, delete to clear), <code>corrections.jsonl</code>, and <code>replacements.json</code>. Nothing is transmitted. Details in <a href="https://github.com/caleb-marks/VoicePop/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+    <p class="lede">State is plain JSON in <code>~/.config/voicepop/</code> — <code>style.json</code>, <code>history.jsonl</code>, retained rotation <code>history.1.jsonl</code>, <code>corrections.jsonl</code>, and <code>replacements.json</code>. The directory and files are owner-only. Use <b>More → Clear transcript history…</b> to remove both history files while keeping corrections and learned replacements. Details in <a href="https://github.com/caleb-marks/VoicePop/blob/main/SECURITY.md">SECURITY.md</a>.</p>
   </div>
 </section>
 

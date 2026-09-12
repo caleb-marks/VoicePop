@@ -269,6 +269,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let learned = NSMenuItem(title: "Edit learned words…", action: #selector(openLearnedCorrections), keyEquivalent: "")
         learned.target = self
         menu.addItem(learned)
+        let clearHistory = NSMenuItem(title: "Clear transcript history…", action: #selector(clearTranscriptHistory), keyEquivalent: "")
+        clearHistory.target = self
+        menu.addItem(clearHistory)
         return menu
     }
 
@@ -444,6 +447,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func openLearnedCorrections() {
         if !FileManager.default.fileExists(atPath: VoicePopPaths.replacements.path) { try? Replacements().save() }
         NSWorkspace.shared.open(VoicePopPaths.replacements)
+    }
+
+    @objc private func clearTranscriptHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear transcript history?"
+        alert.informativeText = "This permanently removes the current and rotated transcript history. Saved corrections, learned words, and writing styles stay in place."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear History")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try HistoryStore.clear()
+            refreshFixLastItem()
+        } catch {
+            let failure = NSAlert()
+            failure.messageText = "Couldn’t clear transcript history"
+            failure.informativeText = error.localizedDescription
+            failure.alertStyle = .warning
+            failure.runModal()
+        }
     }
 
     private static func restartScriptPath() -> String? {

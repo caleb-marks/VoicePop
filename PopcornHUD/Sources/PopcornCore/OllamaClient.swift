@@ -1,3 +1,4 @@
+import CFNetwork
 import Foundation
 
 public struct OllamaClient {
@@ -15,8 +16,54 @@ public struct OllamaClient {
         self.init(endpoint: prefs.endpoint, model: prefs.model, timeoutMs: prefs.timeoutMs)
     }
 
+    public static func isLoopbackURL(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.user == nil,
+              components.password == nil,
+              let rawHost = components.host?.lowercased()
+        else { return false }
+
+        let host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
+        if host == "localhost" || host == "::1" || host == "[::1]" { return true }
+
+        let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return false }
+        var parsed: [Int] = []
+        for octet in octets {
+            guard !octet.isEmpty,
+                  (octet.count == 1 || octet.first != "0"),
+                  octet.allSatisfy(\.isNumber),
+                  let value = Int(octet),
+                  (0...255).contains(value)
+            else { return false }
+            parsed.append(value)
+        }
+        return parsed.first == 127
+    }
+
+    static func requestURL(endpoint: String, path: String) -> URL? {
+        guard var components = URLComponents(string: endpoint),
+              components.query == nil,
+              components.fragment == nil,
+              let base = components.url,
+              isLoopbackURL(base)
+        else { return nil }
+        let suffix = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let prefix = components.path.hasSuffix("/") ? components.path : components.path + "/"
+        components.path = prefix + suffix
+        guard let result = components.url, isLoopbackURL(result) else { return nil }
+        return result
+    }
+
+    static func guardedRedirect(_ request: URLRequest) -> URLRequest? {
+        guard let url = request.url, isLoopbackURL(url) else { return nil }
+        return request
+    }
+
     public func isUp(timeoutMs: Int = 300) -> Bool {
-        guard let url = URL(string: endpoint + "/api/tags") else { return false }
+        guard let url = Self.requestURL(endpoint: endpoint, path: "/api/tags") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let (_, response) = Self.send(request, timeoutMs: timeoutMs)
@@ -25,7 +72,7 @@ public struct OllamaClient {
     }
 
     public func warm() -> Bool {
-        guard let url = URL(string: endpoint + "/api/generate") else { return false }
+        guard let url = Self.requestURL(endpoint: endpoint, path: "/api/generate") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -39,7 +86,7 @@ public struct OllamaClient {
     }
 
     public func polish(text: String, glossary: [String], examples: [CorrectionEntry], budgetMs: Int? = nil) -> String? {
-        guard let url = URL(string: endpoint + "/api/chat") else { return nil }
+        guard let url = Self.requestURL(endpoint: endpoint, path: "/api/chat") else { return nil }
         let system = Self.systemPrompt(glossary: glossary, examples: examples)
         func body(includeThink: Bool) -> Data? {
             var obj: [String: Any] = [
@@ -163,10 +210,22 @@ public struct OllamaClient {
 
     static func send(_ request: URLRequest, timeoutMs: Int) -> (Data?, HTTPURLResponse?) {
         var req = request
+        guard let url = req.url, isLoopbackURL(url) else { return (nil, nil) }
         req.timeoutInterval = TimeInterval(timeoutMs) / 1000.0
         let sem = DispatchSemaphore(value: 0)
         let box = SendBox()
-        let task = URLSession.shared.dataTask(with: req) { d, r, _ in
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable as String: false,
+            kCFNetworkProxiesHTTPSEnable as String: false,
+            kCFNetworkProxiesSOCKSEnable as String: false,
+            kCFNetworkProxiesProxyAutoConfigEnable as String: false,
+        ]
+        let session = URLSession(configuration: configuration, delegate: LoopbackRedirectGuard(), delegateQueue: nil)
+        let task = session.dataTask(with: req) { d, r, _ in
             box.lock.lock()
             box.data = d
             box.response = r as? HTTPURLResponse
@@ -176,10 +235,24 @@ public struct OllamaClient {
         task.resume()
         if sem.wait(timeout: .now() + .milliseconds(timeoutMs)) == .timedOut {
             task.cancel()
+            session.invalidateAndCancel()
             return (nil, nil)
         }
+        session.finishTasksAndInvalidate()
         box.lock.lock()
         defer { box.lock.unlock() }
         return (box.data, box.response)
+    }
+}
+
+private final class LoopbackRedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(OllamaClient.guardedRedirect(request))
     }
 }

@@ -50,13 +50,15 @@ public enum HistoryStore {
     ) {
         do {
             try VoicePopPaths.ensureDir()
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
+            try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
             let data = try JSONEncoder().encode(e) + Data("\n".utf8)
-            var fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+            var fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
             guard fd >= 0 else { throw AppendError.openFailed(errno) }
+            if fchmod(fd, 0o600) != 0 {
+                let code = errno
+                close(fd)
+                throw AppendError.writeFailed(code)
+            }
             var st = stat()
             if fstat(fd, &st) == 0, st.st_size > 1_048_576 {
                 close(fd)
@@ -64,8 +66,14 @@ public enum HistoryStore {
                     try FileManager.default.removeItem(at: rotated)
                 }
                 try FileManager.default.moveItem(at: url, to: rotated)
-                fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+                try VoicePopPaths.secureFile(rotated)
+                fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
                 guard fd >= 0 else { throw AppendError.openFailed(errno) }
+                if fchmod(fd, 0o600) != 0 {
+                    let code = errno
+                    close(fd)
+                    throw AppendError.writeFailed(code)
+                }
             }
             defer { close(fd) }
             try appendAll(fd: fd, data: data)
@@ -75,10 +83,20 @@ public enum HistoryStore {
     }
 
     public static func last(from url: URL = VoicePopPaths.history) -> HistoryEntry? {
+        try? VoicePopPaths.ensureDir()
         guard let line = TailReader.tailLines(of: url).last(where: { !$0.isEmpty }) else {
             return nil
         }
         return try? JSONDecoder().decode(HistoryEntry.self, from: Data(line.utf8))
+    }
+
+    public static func clear(
+        active: URL = VoicePopPaths.history,
+        rotated: URL = VoicePopPaths.historyRotated
+    ) throws {
+        for url in [active, rotated] where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 }
 
@@ -119,14 +137,12 @@ public enum CorrectionStore {
     public static func append(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) {
         do {
             try VoicePopPaths.ensureDir()
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
+            try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
             let data = try JSONEncoder().encode(e) + Data("\n".utf8)
-            let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+            let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
             guard fd >= 0 else { throw AppendError.openFailed(errno) }
             defer { close(fd) }
+            guard fchmod(fd, 0o600) == 0 else { throw AppendError.writeFailed(errno) }
             try appendAll(fd: fd, data: data)
         } catch {
             fputs("VoicePop: corrections append failed: \(error)\n", stderr)
@@ -134,6 +150,7 @@ public enum CorrectionStore {
     }
 
     public static func recent(limit: Int, from url: URL = VoicePopPaths.corrections) -> [CorrectionEntry] {
+        try? VoicePopPaths.ensureDir()
         let lines = TailReader.tailLines(of: url).filter { !$0.isEmpty }
         return lines.suffix(limit).compactMap { line in
             try? JSONDecoder().decode(CorrectionEntry.self, from: Data(line.utf8))
@@ -170,6 +187,7 @@ public struct Replacements: Codable, Equatable {
     }
 
     public static func inspect(from url: URL = VoicePopPaths.replacements) -> LoadResult {
+        try? VoicePopPaths.ensureDir()
         guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(Replacements.self, from: data)
@@ -185,13 +203,11 @@ public struct Replacements: Codable, Equatable {
 
     public func save(to url: URL = VoicePopPaths.replacements) throws {
         try VoicePopPaths.ensureDir()
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(self).write(to: url, options: .atomic)
+        try VoicePopPaths.secureFile(url)
     }
 
     public mutating func learn(typed: String, corrected: String, maxPhraseWords: Int, now: Date = Date()) {

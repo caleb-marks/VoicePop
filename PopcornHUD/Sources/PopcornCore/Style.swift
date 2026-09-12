@@ -93,6 +93,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
     }
 
     public static func load(from url: URL = VoicePopPaths.style) -> StylePrefs {
+        try? VoicePopPaths.ensureDir()
         guard FileManager.default.fileExists(atPath: url.path) else { return .default }
         do {
             let data = try Data(contentsOf: url)
@@ -102,20 +103,19 @@ public struct StylePrefs: Codable, Equatable, Sendable {
             let bad = url.appendingPathExtension("bad")
             try? FileManager.default.removeItem(at: bad)
             try? FileManager.default.moveItem(at: url, to: bad)
+            try? VoicePopPaths.secureFile(bad)
             return .default
         }
     }
 
     public func save(to url: URL = VoicePopPaths.style) throws {
         try VoicePopPaths.ensureDir()
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(self)
         try data.write(to: url, options: .atomic)
+        try VoicePopPaths.secureFile(url)
     }
 }
 
@@ -131,8 +131,24 @@ public enum VoicePopPaths {
     public static var corrections: URL { dir.appendingPathComponent("corrections.jsonl") }
     public static var replacements: URL { dir.appendingPathComponent("replacements.json") }
 
+    static var privateFiles: [URL] {
+        [style, style.appendingPathExtension("bad"), history, historyRotated, corrections, replacements]
+    }
+
     public static func ensureDir() throws {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try ensurePrivateDirectory(at: dir)
+        for file in privateFiles where FileManager.default.fileExists(atPath: file.path) {
+            try secureFile(file)
+        }
+    }
+
+    public static func ensurePrivateDirectory(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
+
+    public static func secureFile(_ url: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
 

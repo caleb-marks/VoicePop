@@ -1,12 +1,12 @@
 <h1 align="center">VoicePop</h1>
 
-<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release - the text types itself into whatever app you were in.<br>Speech never leaves the machine.<br>A free, open-source alternative to Wispr Flow and Superwhisper. No subscription, no account.</p>
+<p align="center">Push-to-talk dictation for macOS. Hold <b>FN</b>, speak, release - the text types itself into whatever app you were in.<br>Audio and speech recognition stay on your Mac.<br>Free and open source. No subscription or account.</p>
 
 <p align="center">
   <a href="https://github.com/caleb-marks/VoicePop/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/caleb-marks/VoicePop/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-000?logo=apple&logoColor=white">
   <img alt="Swift 5.9" src="https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white">
-  <img alt="Local only" src="https://img.shields.io/badge/cloud%20calls-0-2ea44f">
+  <img alt="Local speech recognition" src="https://img.shields.io/badge/speech%20recognition-local-2ea44f">
   <a href="https://github.com/caleb-marks/VoicePop/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/caleb-marks/VoicePop"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -15,18 +15,18 @@
 
 ## Why
 
-Built-in macOS dictation is cloud-backed, punctuates badly, and gives no honest signal that it is listening. I dictate a lot - notes, messages, commit messages - and wanted three things Apple's version does not do together: **stay on the device**, **start typing in under a second**, and **look like it is listening** so I am not talking into a void.
+VoicePop brings hold-to-talk dictation, a responsive visual indicator, per-app writing styles, and learned corrections to macOS. It uses local speech recognition and offers optional text polishing through a loopback-only Ollama connection. The project focuses on a fast, predictable dictation workflow without a subscription.
 
-VoicePop is that. A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, by peteonrails) and adds the parts that make dictation usable day to day: a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.
+A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, by peteonrails) and adds a HUD driven by live mic amplitude, per-app writing styles, and corrections that stick.
 
 ## What it does
 
 - **Hold FN, talk, release.** Text lands in the focused app. Escape cancels.
-- **Local speech.** NVIDIA Parakeet (`parakeet-tdt-0.6b-v3-int8`) by default, Whisper Tiny→Large-turbo as fallbacks. No network calls in the dictation path.
+- **Local speech.** NVIDIA Parakeet (`parakeet-tdt-0.6b-v3-int8`) by default, Whisper Tiny→Large-turbo as fallbacks. Audio and speech recognition remain on the Mac.
 - **HUD that reacts to you.** Kernel physics driven by real mic amplitude at 60 fps, then a `Transcribing…` capsule, then gone. Honors Reduce Motion.
 - **Writing style per app.** Automatic / Casual / Formal, with per-app overrides (Messages → Casual, Mail → Formal). Terminals are never restyled.
 - **Corrections that stick.** Fix the last thing typed, hit **Save & Learn**; the substitution applies from then on. Plain JSON on disk.
-- **Optional on-device polish.** Formal style can run through a local LLM (`qwen3.5:4b-mlx` via Ollama). If it is slow or down, rules output ships unchanged inside a 5 s budget.
+- **Optional local polish.** Formal style can send transcript text to Ollama over a loopback-only connection (`qwen3.5:4b-mlx` by default). If it is slow or unavailable, rules output ships unchanged inside a 5 s budget. VoicePop blocks remote endpoints and non-loopback redirects; the Ollama service and model remain under your control.
 
 <p align="center">
   <picture><source media="(prefers-color-scheme: dark)" srcset="docs/visuals/popcorn-quiet-dark.png"><img src="docs/visuals/popcorn-quiet-light.png" width="150" alt="HUD at a quiet speaking level - few kernels"></picture>
@@ -77,7 +77,7 @@ The original run - 40 TTS fixtures, CLI transcribe, WER + latency - could only c
 
 Better accuracy was not worth doubling the tail latency on a key you hold down. And that third row - a model that could not be benched at all because the binary did not include it - is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled. Parakeet became the default once it was runnable; the official Whisper-only binary is kept for one-command rollback. Re-benching Parakeet on the same 40 fixtures is still open - see [docs/metrics.md](docs/metrics.md).
 
-Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests (57 tests: audio framing, text clean, physics bounds, kernel recycling), timing instrumentation behind `POPCORNHUD_TIMING=1`, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
+Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests, timing instrumentation behind `POPCORNHUD_TIMING=1`, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
 
 Built with AI pair-programming (Claude Code, Codex). Architecture, product decisions, review, and macOS integration are mine.
 
@@ -85,7 +85,7 @@ Built with AI pair-programming (Claude Code, Codex). Architecture, product decis
 
 Menu bar → **Dictation model** switches engines (downloads on first pick, Ready line shows the active one). **Fix "…"** opens the last typed text; edit and **Save & Learn** (⌘↩). **More → Edit learned words…** for manual edits.
 
-State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl` (rotates at 1 MiB - delete to clear), `corrections.jsonl`, `replacements.json`. Names you say often are seeded via `scripts/seed-replacements.py`.
+State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl`, the retained rotation `history.1.jsonl`, `corrections.jsonl`, and `replacements.json`. VoicePop keeps the directory owner-only (`0700`) and those files owner-only (`0600`). Use **More → Clear transcript history…** to remove both history files while keeping saved corrections, learned replacements, and styles. Names you say often can be seeded via `scripts/seed-replacements.py`.
 
 <details>
 <summary><b>Build from source, rollback, instrumentation</b></summary>
@@ -99,7 +99,19 @@ Build companion binaries **before** install (config points at `bin/voxtype-clean
 ./scripts/setup-launch-agents.sh    # packages VoicePop.app → /Applications
 ```
 
-After any HUD rebuild, rerun `./scripts/setup-launch-agents.sh` - it rebuilds, signs, replaces `/Applications/VoicePop.app`, and relaunches. Never run a second HUD binary. Stale Dock icon: `killall Dock`. `scripts/make-release.sh` produces both release artifacts.
+After any HUD rebuild, rerun `./scripts/setup-launch-agents.sh` - it rebuilds, signs, replaces `/Applications/VoicePop.app`, and relaunches. Never run a second HUD binary. Stale Dock icon: `killall Dock`.
+
+Release builds use a pinned, locked Voxtype source revision and remap Rust and native compiler paths before packaging. Build without changing the installed engine:
+
+```bash
+./scripts/build-release-engine.sh /path/to/voxtype /tmp/voicepop-release-engine
+VOXTYPE_BIN=/tmp/voicepop-release-engine/voxtype-bin \
+VOXTYPE_PROVENANCE=/tmp/voicepop-release-engine/VOXTYPE-BUILD.txt \
+  ./scripts/make-release.sh
+./scripts/verify-release-artifacts.sh
+```
+
+Both downloads contain the VoicePop and upstream Voxtype licenses plus the exact source revision, feature set, and build settings used for the bundled engine.
 
 Grant **Accessibility**, **Input Monitoring**, and **Microphone** to **Voxtype.app** (not Terminal, not VoicePop).
 
@@ -133,7 +145,7 @@ Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is d
 Issues and pull requests are welcome. Build and test with:
 
 ```bash
-swift test --package-path PopcornHUD   # 57 tests
+swift test --package-path PopcornHUD
 ```
 
 `PopcornCore` is the tested target - put logic there. Full guidance in [CONTRIBUTING.md](CONTRIBUTING.md).

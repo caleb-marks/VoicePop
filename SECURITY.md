@@ -2,12 +2,12 @@
 
 ## Scope
 
-VoicePop is a local macOS menu-bar app. The dictation path makes no network calls: audio is captured, transcribed on-device by [Voxtype](https://voxtype.io) (NVIDIA Parakeet or OpenAI Whisper), post-processed locally, and typed into the focused app. Nothing is uploaded.
+VoicePop is a local macOS menu-bar app. Audio is captured and transcribed on-device by [Voxtype](https://voxtype.io) (NVIDIA Parakeet or OpenAI Whisper), then typed into the focused app. VoicePop does not send audio to a remote service.
 
-Two things do touch the network, both outside the dictation path:
+Two features use network APIs:
 
 - **Model downloads.** The first time you pick a dictation model, Voxtype fetches its weights.
-- **Optional local LLM polish.** Formal style can route text through Ollama on `localhost`. That is a loopback call to a server you run.
+- **Optional local LLM polish.** Formal style can send transcript text, glossary terms, and recent correction examples to Ollama. VoicePop accepts only canonical loopback endpoints (`localhost`, `127.0.0.0/8`, or `::1`), bypasses configured proxies, and rejects redirects to non-loopback addresses. The Ollama service and model are separately installed and controlled by you; VoicePop cannot guarantee how a custom service processes data after receiving it locally.
 
 ## What VoicePop stores
 
@@ -16,11 +16,12 @@ Plain files in `~/.config/voicepop/`:
 | File | Contents |
 |---|---|
 | `history.jsonl` | Recent transcripts, rotated at 1 MiB |
+| `history.1.jsonl` | The previous transcript file retained after rotation |
 | `corrections.jsonl` | Corrections you saved |
 | `replacements.json` | Learned substitutions |
 | `style.json` | Per-app writing style |
 
-Delete any of them to clear that data. VoicePop never transmits them.
+VoicePop requests owner-only permissions for this directory (`0700`) and these files (`0600`), including existing files it finds. Use **More → Clear transcript history…** to delete both history files without removing corrections, learned replacements, or styles. You can delete the other files individually to clear their data.
 
 ## Permissions it asks for
 
