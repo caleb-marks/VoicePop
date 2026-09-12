@@ -52,6 +52,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             self?.apply(state: state)
         }
 
+        // Nothing else launches the daemon after a reboot or logout: bring it up
+        // ourselves, or FN does nothing until the user picks "Restart dictation".
+        if !VoxtypeDaemon.isLive(), FileManager.default.isExecutableFile(atPath: Self.voxtypeBin) {
+            fputs("VoicePop: Voxtype daemon not running at launch; starting it\n", stderr)
+            restartVoxtype()
+        }
+
         // Process discovery must not block HUD startup on the main thread.
         scheduleMenubarSuppressRetries()
         refreshCachesIfStale(force: true)
