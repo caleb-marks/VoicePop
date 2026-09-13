@@ -19,6 +19,17 @@ enum PopcornHUDMain {
         // VOICEPOP_CONFIG_DIR fixtures, writes PNGs to the given directory, and exits. Never runs
         // in a normal launch - only reached when the env var is set.
         if let outDir = ProcessInfo.processInfo.environment["VOICEPOP_UI_SNAPSHOT"], !outDir.isEmpty {
+            // The harness seeds fixture history, styles, and learned words. Refuse to run against
+            // the real ~/.config/voicepop so a missing override can never overwrite user data.
+            let fixtureDir = ProcessInfo.processInfo.environment["VOICEPOP_CONFIG_DIR"] ?? ""
+            let realDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/voicepop").standardizedFileURL.resolvingSymlinksInPath().path
+            guard !fixtureDir.isEmpty,
+                  URL(fileURLWithPath: fixtureDir).standardizedFileURL.resolvingSymlinksInPath().path != realDir
+            else {
+                fputs("VoicePop UI snapshot harness: set VOICEPOP_CONFIG_DIR to a temporary directory (refusing to touch ~/.config/voicepop)\n", stderr)
+                exit(64)
+            }
             app.setActivationPolicy(.accessory)
             UISnapshotHarness.run(outputDirectory: outDir)
             exit(0)
