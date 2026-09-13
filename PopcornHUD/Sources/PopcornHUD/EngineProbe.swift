@@ -10,8 +10,46 @@ enum EngineProbe {
     static let configFile = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/voxtype/config.toml")
 
+    /// Spawn results are reused while the binary, Voxtype's config file, and the models directory are
+    /// unchanged (mtime + size), capped at `cacheTTL`. Every field except `configuredModelPathExists`
+    /// derives from those three inputs, so an unchanged fingerprint means an unchanged answer.
+    /// Before this, each probe spawned `voxtype-bin` four times, and probes fire on every app
+    /// activation and daemon appear/disappear - several 28 MB process launches per dictation.
+    static let cacheTTL: TimeInterval = 600
+
+    private static let cacheLock = NSLock()
+    private static var cached: (fingerprint: ProbeFingerprint, result: EngineProbeResult, at: Date)?
+
+    /// Drop the cached probe so the next call spawns again (after setup, a model switch, etc.).
+    static func invalidateCache() {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        cached = nil
+    }
+
     static func probe() -> EngineProbeResult {
         let bin = EngineControl.voxtypeBin
+        let fingerprint = ProbeFingerprint(paths: [bin, configFile.path, modelsDirectory.path])
+        if var hit = cachedResult(for: fingerprint) {
+            if let model = hit.configuredModel, model.hasPrefix("/") {
+                hit.configuredModelPathExists = FileManager.default.fileExists(atPath: model)
+            }
+            Timing.event("probe.cached")
+            return hit
+        }
+        let result = uncachedProbe(bin: bin)
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        cached = (fingerprint, result, Date())
+        return result
+    }
+
+    private static func cachedResult(for fingerprint: ProbeFingerprint) -> EngineProbeResult? {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        guard let cached, cached.fingerprint == fingerprint,
+              Date().timeIntervalSince(cached.at) < cacheTTL else { return nil }
+        return cached.result
+    }
+
+    private static func uncachedProbe(bin: String) -> EngineProbeResult {
         var result = EngineProbeResult(binaryInstalled: FileManager.default.isExecutableFile(atPath: bin))
         guard result.binaryInstalled else { return result }
 

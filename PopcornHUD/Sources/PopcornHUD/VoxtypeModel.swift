@@ -66,13 +66,10 @@ enum VoxtypeModel {
         var errorDescription: String? { message }
     }
 
+    /// Configured model name, read through `EngineProbe`'s cache so a menu open no longer costs two
+    /// `voxtype-bin` spawns when nothing on disk has changed.
     static func currentModel() -> String? {
-        let engine = (try? run(["config", "get", "engine"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "whisper"
-        let key = engine == "parakeet" ? "parakeet.model" : "whisper.model"
-        guard let out = try? run(["config", "get", key]) else { return nil }
-        let name = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
+        EngineProbe.probe().configuredModel
     }
 
     static func installedNames() -> Set<String> {

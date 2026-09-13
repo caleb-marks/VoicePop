@@ -139,6 +139,7 @@ final class DictationHealthMonitor {
 
     /// Re-probe engine/model facts off the main thread (e.g. after setup or a model switch).
     func refresh() {
+        EngineProbe.invalidateCache()
         requestProbe(minIntervalMs: 0)
     }
 
