@@ -144,7 +144,7 @@ Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is d
 
 ## Docs
 
-[docs/metrics.md](docs/metrics.md) — benchmarks. [SECURITY.md](SECURITY.md) — what runs locally, what touches the network, and what is stored on disk.
+[docs/metrics.md](docs/metrics.md) — measurements, targets, and open live checks. [docs/design-notes.md](docs/design-notes.md) — why the HUD, recovery, and setup work the way they do. [SECURITY.md](SECURITY.md) — what runs locally, what touches the network, and what is stored on disk.
 
 ## Contributing
 
