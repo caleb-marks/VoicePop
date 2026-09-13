@@ -12,6 +12,10 @@ import PopcornCore
 struct SettingsAppearanceView: View {
     @ObservedObject var store: SettingsStore
     @State private var intensity: SyntheticIntensity = .normal
+    /// Preview is the production 260x420 card scaled down; the top `previewTopCrop` card px are
+    /// always empty (see the Canvas comment) and are cropped so the tab isn't mostly blank.
+    private static let previewScale: CGFloat = 0.62
+    private static let previewTopCrop: CGFloat = 70
     @StateObject private var engine: AppearancePreviewEngine
 
     /// `fixtureEngine`, when provided (harness-only), is used as-is instead of a fresh engine -
@@ -25,7 +29,9 @@ struct SettingsAppearanceView: View {
     var body: some View {
         Form {
             Section("Mascot") {
-                Picker("Mascot", selection: Binding(
+                // The section header already says "Mascot"; a second visible label reads as a
+                // duplicate. The accessibility label below keeps the name for VoiceOver.
+                Picker("", selection: Binding(
                     get: { store.prefs.mascot },
                     set: { newValue in
                         store.prefs.mascot = newValue
@@ -37,6 +43,7 @@ struct SettingsAppearanceView: View {
                     Text("Nandor the beagle").tag(Mascot.beagle)
                 }
                 .pickerStyle(.radioGroup)
+                .labelsHidden()
                 .accessibilityLabel("Mascot")
                 if let error = store.saveError {
                     HStack {
@@ -67,8 +74,17 @@ struct SettingsAppearanceView: View {
                             PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
                         }
                         .frame(width: Tunables.cardW, height: Tunables.cardH)
-                        .scaleEffect(0.62, anchor: .center)
-                        .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
+                        // Anchor at the bottom and crop the card's empty headroom: the highest
+                        // kernel apex is ~85 card px from the top (launch speed vs gravity), so
+                        // trimming `previewTopCrop` removes only transparent space above the
+                        // pile - the canvas itself still lays out at full size.
+                        .scaleEffect(Self.previewScale, anchor: .bottom)
+                        .frame(
+                            width: Tunables.cardW * Self.previewScale,
+                            height: (Tunables.cardH - Self.previewTopCrop) * Self.previewScale,
+                            alignment: .bottom
+                        )
+                        .clipped()
                     }
                     Spacer(minLength: 0)
                 }

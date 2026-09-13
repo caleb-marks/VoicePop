@@ -51,6 +51,13 @@ struct SettingsGeneralView: View {
                 Label(store.status.headline, systemImage: store.status.issue == nil ? "checkmark.circle" : "exclamationmark.triangle")
                     .foregroundStyle(store.status.issue == nil ? Color.primary : Color.orange)
                     .accessibilityLabel(store.status.headline)
+                // The same explanation the menu's second line shows - what's wrong and what to do.
+                if let detail = store.status.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // .openSetup is folded into the always-visible "Check Setup…" button below (M-3),
                 // so it never appears twice.
                 ForEach(store.status.actions.filter { $0 != .openSetup }, id: \.self) { action in
@@ -62,16 +69,9 @@ struct SettingsGeneralView: View {
                 Button("Check Setup…") { SetupAssistant.presentChecklist() }
             }
 
-            Section("Transcript history") {
-                Button("Clear Transcript History…", role: .destructive) {
-                    showClearHistoryConfirm = true
-                }
-                if let clearHistoryError {
-                    Text(clearHistoryError).font(.caption).foregroundStyle(.red)
-                }
-            }
-
-            Section("Advanced") {
+            // One "Advanced" group instead of two single-button sections; the footer says what
+            // clearing does so the destructive action isn't a bare button.
+            Section {
                 Button("Open Voxtype Configuration File") {
                     let path = NSString(string: "~/.config/voxtype/config.toml").expandingTildeInPath
                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
@@ -84,6 +84,16 @@ struct SettingsGeneralView: View {
                     }
                     NSWorkspace.shared.open(VoicePopPaths.replacements)
                 }
+                Button("Clear Transcript History…", role: .destructive) {
+                    showClearHistoryConfirm = true
+                }
+                if let clearHistoryError {
+                    Text(clearHistoryError).font(.caption).foregroundStyle(.red)
+                }
+            } header: {
+                Text("Advanced")
+            } footer: {
+                Text("Clearing history removes the transcript history files. Corrections, learned words, and writing styles are kept.")
             }
         }
         .formStyle(.grouped)

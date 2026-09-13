@@ -10,6 +10,18 @@ struct SettingsDictationView: View {
     @StateObject private var models: ModelListViewModel
     @State private var newAppName = ""
 
+    private var trimmedNewAppName: String {
+        newAppName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Same case-insensitive match the menu uses to resolve an app's override, so "mail" can't
+    /// silently add a second key next to "Mail".
+    private var newAppNameIsDuplicate: Bool {
+        let name = trimmedNewAppName
+        guard !name.isEmpty else { return false }
+        return store.prefs.perApp.keys.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
     init(store: SettingsStore, fixtureModels: ModelListViewModel? = nil) {
         self.store = store
         _models = StateObject(wrappedValue: fixtureModels ?? ModelListViewModel())
@@ -78,15 +90,25 @@ struct SettingsDictationView: View {
                     }
                 }
                 HStack {
-                    TextField("App name (as shown in menu)", text: $newAppName)
+                    TextField("App name, e.g. Mail", text: $newAppName)
+                        .accessibilityLabel("New app name")
                     Button("Add") {
-                        let trimmed = newAppName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        store.prefs.perApp[trimmed] = .casual
+                        guard !trimmedNewAppName.isEmpty, !newAppNameIsDuplicate else { return }
+                        store.prefs.perApp[trimmedNewAppName] = .casual
                         store.save()
                         newAppName = ""
                     }
-                    .disabled(newAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(trimmedNewAppName.isEmpty || newAppNameIsDuplicate)
+                    .accessibilityLabel("Add app override")
+                }
+                if newAppNameIsDuplicate {
+                    Text("\u{201c}\(trimmedNewAppName)\u{201d} already has an override.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("New apps start as Casual.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

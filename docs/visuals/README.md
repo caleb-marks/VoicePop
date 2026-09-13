@@ -18,6 +18,6 @@ PopcornHUD/.build/release/PopcornCapture docs/visuals beagle   # only if the bea
 
 Review and measurement modes write outside `docs/visuals/`:
 
-- `PopcornCapture --review <dir>` — every documented frame on light, dark, gray, mid-gray, and busy backdrops at 1×, 2×, and 4×.
+- `PopcornCapture --review <dir>` — every documented frame on light, dark, gray, mid-gray, and busy backdrops at 1×, 2×, and 4×, plus two status-chrome edge cases: `popcorn-detail-*` (the "Audio levels unavailable" line on its plate) and `popcorn-longlabel-*` (an over-long capsule label truncated with an ellipsis).
 - `PopcornCapture --motion <dir>` — pile motion evidence: contact sheets (full, pile-only, heap-only), a frame-by-frame collapse sheet, Reduce Motion, a per-piece `heap-trace.csv`, and MP4/GIF clips.
 - `PopcornCapture --bench [--json out.json]` — release-build costs: simulation (with collision and heap phases), scene mapping, and offscreen rendering at 1× and 2×, including a forced 120-kernel population. Offscreen `ImageRenderer` timings are not compositor frame times.
