@@ -22,6 +22,14 @@ enum LoginItem {
         SMAppService.mainApp.status == .enabled
     }
 
+    // All SMAppService calls go through this one serial queue (N2-L6): register/unregister are
+    // synchronous XPC round trips, and running two concurrently (e.g. a fast on/off/on) could let
+    // completions arrive out of order and disagree with the toggle's actual final state.
+    private static let queue = DispatchQueue(label: "com.caleb.voicepop.loginitem")
+    // Bumped on every setEnabledAsync call (main thread only); a completion whose generation has
+    // since been superseded by a newer call is dropped rather than applied out of order.
+    private static var generation = 0
+
     static func registerIfNeeded() {
         guard isAvailable else { return }
         let defaults = UserDefaults.standard
@@ -41,7 +49,7 @@ enum LoginItem {
     /// `SMAppService.status` is a synchronous XPC round trip - never call it on the main thread
     /// from a UI path that opens frequently (Settings General appearing/refreshing).
     static func isEnabledAsync(completion: @escaping (Bool) -> Void) {
-        DispatchQueue.global(qos: .utility).async {
+        queue.async {
             let value = isEnabled
             DispatchQueue.main.async { completion(value) }
         }
@@ -49,19 +57,27 @@ enum LoginItem {
 
     /// `SMAppService.register()`/`.unregister()` are synchronous XPC round trips too. Completion
     /// is delivered on main so the caller can apply an optimistic UI state and revert it on
-    /// failure. Skips the call entirely when the service is already in the requested state
-    /// (checked off-main, right before acting), so a caller that re-applies a known-good value -
-    /// e.g. a load that happens to match what's already registered - never pointlessly calls
-    /// `register()` on an already-registered service (which the SDK docs say returns
-    /// `kSMErrorAlreadyRegistered`).
+    /// failure.
+    ///
+    /// Skips the call when already in the requested state - but "requested state" for *disabling*
+    /// means `.notRegistered`, not merely "not `.enabled`" (N2-L6): `.requiresApproval` also
+    /// reads as "not enabled", so comparing against `.enabled` for both directions meant turning
+    /// the toggle off while macOS still had it pending approval never actually called
+    /// `unregister()`, leaving it registered (and visible in Login Items) despite the toggle
+    /// showing off. Also serialized on `queue` with a generation counter so a fast repeated
+    /// toggle can't let an earlier call's completion land after a later one's and revert it.
     static func setEnabledAsync(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
         guard isAvailable else {
             completion(.failure(Failure(message: "Open at Login isn\u{2019}t available for this build.")))
             return
         }
-        DispatchQueue.global(qos: .utility).async {
+        generation += 1
+        let myGeneration = generation
+        queue.async {
             do {
-                if isEnabled != enabled {
+                let status = SMAppService.mainApp.status
+                let alreadyAsRequested = enabled ? status == .enabled : status == .notRegistered
+                if !alreadyAsRequested {
                     if enabled {
                         try SMAppService.mainApp.register()
                     } else {
@@ -69,9 +85,15 @@ enum LoginItem {
                     }
                 }
                 UserDefaults.standard.set(true, forKey: configuredKey)
-                DispatchQueue.main.async { completion(.success(())) }
+                DispatchQueue.main.async {
+                    guard generation == myGeneration else { return }
+                    completion(.success(()))
+                }
             } catch {
-                DispatchQueue.main.async { completion(.failure(error)) }
+                DispatchQueue.main.async {
+                    guard generation == myGeneration else { return }
+                    completion(.failure(error))
+                }
             }
         }
     }

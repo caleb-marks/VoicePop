@@ -26,12 +26,19 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     /// One saver per presented entry: it remembers which correction record it already appended,
     /// so pressing Save again after a failure (Retry) never writes a duplicate.
     private var saver: CorrectionSaver?
+    /// Explicit dirtiness (N2-M2), set by `textDidChange` and cleared on a successful save or
+    /// cancel. Comparing the text view against `entry.out` (the review-1 approach) was wrong: a
+    /// successful save leaves the edited text in place with `entry` unchanged, so the *next*
+    /// "Fix Last Dictation" for a different entry saw "unsaved edits" that had, in fact, already
+    /// been saved, and showed a false "Discard unsaved correction?" prompt every time.
+    private var isDirty = false
 
     /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): builds and populates the window from a fixture
     /// entry without touching `HistoryStore`, optionally showing the inline error+Retry state.
     func presentFixture(entry: HistoryEntry, correctedText: String, errorMessage: String? = nil) {
         self.entry = entry
         self.saver = CorrectionSaver()
+        isDirty = false
         if !built { buildWindow() }
         rawLabel?.stringValue = "What I heard: \(entry.raw)"
         textView?.string = correctedText
@@ -48,13 +55,6 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     /// `history.jsonl`), and this is a deliberate, infrequent user action where the extra disk
     /// read is cheap and correctness matters more than avoiding it.
     func present() {
-        // Reopening an existing editor must preserve edits, errors, and retry identity.
-        if let window, window.isVisible {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(textView)
-            return
-        }
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {
             returnTo = front
@@ -64,22 +64,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         }
     }
 
-    /// True once the text view has been edited away from the presented entry's original text (or
-    /// a save attempt already failed, which - since `CorrectionSaver.save` only ever runs on a
-    /// change from the original - implies the same thing). Used to decide whether re-presenting a
-    /// *different* entry needs to confirm before discarding (M-2).
-    private var hasUnsavedEdits: Bool {
-        guard built, let entry else { return false }
-        return (textView?.string ?? "") != entry.out
-    }
-
     private func presentResolved(_ entry: HistoryEntry?) {
-        // Two rapid menu requests can complete asynchronously in either order.
-        if let window, window.isVisible {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
         guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
@@ -89,17 +74,21 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
             returnFocus()
             return
         }
-        // Same entry already open: just bring it forward. Resetting here (the old behavior)
-        // discarded in-progress edits and, worse, replaced `saver` - so a Retry after a save
-        // failure lost track of what it had already appended and could duplicate the
-        // corrections.jsonl record (M-2).
+        // Same entry already open (this also covers two rapid menu requests completing
+        // asynchronously in either order, since both resolve to the same last entry): just bring
+        // it forward. Resetting here (the old behavior) discarded in-progress edits and, worse,
+        // replaced `saver` - so a Retry after a save failure lost track of what it had already
+        // appended and could duplicate the corrections.jsonl record (M-2).
         if built, let window, window.isVisible, self.entry?.ts == entry.ts {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             window.makeFirstResponder(textView)
             return
         }
-        if hasUnsavedEdits {
+        // A *different* entry than the one currently open, with edits the user hasn't saved yet
+        // (isDirty - N2-M2 - not "does the text differ from entry.out", which stayed true forever
+        // after a successful save and produced a false prompt on every subsequent correction).
+        if isDirty {
             let alert = NSAlert()
             alert.messageText = "Discard unsaved correction?"
             alert.informativeText = "Fixing a newer dictation will discard your unsaved edits to the previous one."
@@ -111,6 +100,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         }
         self.entry = entry
         self.saver = CorrectionSaver()
+        isDirty = false
         if !built { buildWindow() }
         rawLabel?.stringValue = "What I heard: \(entry.raw)"
         textView?.string = entry.out
@@ -247,6 +237,13 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         return false
     }
 
+    /// User-driven edits only - `presentResolved` assigns `textView?.string = entry.out`
+    /// directly, which does not fire this (NSTextView's `string` setter, unlike the text system's
+    /// own editing, posts no change notification).
+    func textDidChange(_ notification: Notification) {
+        isDirty = true
+    }
+
     /// Copies exactly what is in the text view - not trimmed - per spec: "Copy returns exactly
     /// the edited text."
     @objc func copyCorrected() {
@@ -264,6 +261,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
                 correctedText: corrected,
                 maxPhraseWords: StylePrefsCache.current().learning.maxPhraseWords
             )
+            isDirty = false
             close()
         } catch {
             // Keep the window and the user's edits open; show an actionable error with Retry
@@ -279,6 +277,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     }
 
     @objc func cancel() {
+        isDirty = false
         close()
     }
 

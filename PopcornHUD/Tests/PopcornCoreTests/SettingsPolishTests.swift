@@ -196,6 +196,53 @@ final class SettingsPolishTests: XCTestCase {
         XCTAssertEqual(r.entries.map(\.from), ["recieve"])
     }
 
+    /// review-2 N2-M3: `LearnedWordsViewModel` replays a *queue* of pending mutations at every
+    /// save, not just the most recent one - otherwise a failed edit is silently dropped the
+    /// moment a later, different edit saves successfully. This reproduces the queue-replay
+    /// mechanics (not the view model itself, which isn't reachable from PopcornCoreTests) against
+    /// a real file: two mutations queued while corrupt, replayed together once repaired.
+    func testQueuedMutationsAllReplayTogetherAfterFailure() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("replacements.json")
+        var initial = Replacements()
+        initial.entries.append(Replacement(from: "voxtype", to: "Voxtype", count: 1, lastTs: "t0"))
+        try initial.save(to: url)
+
+        // Corrupt the file (as if it changed underneath an open Settings session), then queue two
+        // edits made while it's broken.
+        try Data("{broken".utf8).write(to: url)
+        var pending: [Replacements.Mutation] = [
+            .add(Replacement(from: "recieve", to: "receive", count: 1, lastTs: "t1")),
+            .add(Replacement(from: "teh", to: "the", count: 1, lastTs: "t2")),
+        ]
+        XCTAssertEqual(Replacements.inspect(from: url), .corrupt)
+
+        // Repair the file, then replay the whole queue at once (what `flush()` does) rather than
+        // only the last mutation.
+        try initial.save(to: url)
+        guard case .ready(var fresh) = Replacements.inspect(from: url) else {
+            return XCTFail("expected a readable file after repair")
+        }
+        for mutation in pending { fresh.apply(mutation) }
+        try fresh.save(to: url)
+        pending.removeAll()
+
+        guard case .ready(let final) = Replacements.inspect(from: url) else {
+            return XCTFail("expected a readable file")
+        }
+        XCTAssertEqual(Set(final.entries.map(\.from)), ["voxtype", "recieve", "teh"], "both queued edits must land, not just the last one")
+    }
+
+    /// N2-L3: whitespace must be trimmed before keying - `DiffLearner.key` only strips
+    /// punctuation, so a caller that keys an untrimmed manual entry stores a key that never
+    /// matches what `learn()` would produce for the same word.
+    func testDiffLearnerKeyDoesNotTrimWhitespaceSoCallersMustTrimFirst() {
+        XCTAssertEqual(DiffLearner.key(" teh "), " teh ")
+        XCTAssertNotEqual(DiffLearner.key(" teh "), DiffLearner.key("teh"), "an untrimmed key must not accidentally match the trimmed one")
+        XCTAssertEqual(DiffLearner.key(" teh ".trimmingCharacters(in: .whitespacesAndNewlines)), "teh")
+    }
+
     /// End-to-end at the file level: this is the exact M-1 failure scenario from review-1 - a
     /// concurrent writer (standing in for the correction window's CorrectionSaver) adds a word
     /// after Settings has already read the file, and Settings' own edit must not erase it.
