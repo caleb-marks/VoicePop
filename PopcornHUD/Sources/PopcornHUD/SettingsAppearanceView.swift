@@ -11,14 +11,16 @@ import PopcornCore
 /// `onAppear`/`onDisappear` alone do not fire reliably for window-level visibility changes.
 struct SettingsAppearanceView: View {
     @ObservedObject var store: SettingsStore
+    let health: DictationHealthMonitor?
     @State private var intensity: SyntheticIntensity = .normal
     @StateObject private var engine: AppearancePreviewEngine
 
     /// `fixtureEngine`, when provided (harness-only), is used as-is instead of a fresh engine -
     /// e.g. one already `preroll`ed a couple of seconds so a snapshot shows motion mid-animation
     /// instead of frame zero.
-    init(store: SettingsStore, fixtureEngine: AppearancePreviewEngine? = nil) {
+    init(store: SettingsStore, health: DictationHealthMonitor? = nil, fixtureEngine: AppearancePreviewEngine? = nil) {
         self.store = store
+        self.health = health
         _engine = StateObject(wrappedValue: fixtureEngine ?? AppearancePreviewEngine())
     }
 
@@ -83,6 +85,10 @@ struct SettingsAppearanceView: View {
         .onAppear {
             engine.setIntensity(intensity)
             engine.setTabVisible(true)
+            // The preview must never compete with a live dictation's HUD rendering on main.
+            health?.addListener { status in
+                engine.setHUDActive(status.daemon.isHot || status.daemon.isTranscribing)
+            }
         }
         .onDisappear { engine.setTabVisible(false) }
     }
@@ -107,7 +113,8 @@ private struct WindowAccessor: NSViewRepresentable {
 
 /// Owns a standalone `PopcornSim` + `SyntheticSpeech` pair, isolated from the HUD's simulation.
 /// `running` gates the `TimelineView` so no work happens while paused; it is the AND of tab
-/// visibility (SwiftUI appear/disappear) and window visibility (occlusion/miniaturize/app-hide).
+/// visibility (SwiftUI appear/disappear), window visibility (occlusion/miniaturize/app-hide), and
+/// the HUD being idle (a live dictation's HUD must never compete with this preview on main).
 final class AppearancePreviewEngine: ObservableObject {
     @Published private(set) var running = false
     private(set) var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -124,6 +131,7 @@ final class AppearancePreviewEngine: ObservableObject {
     private var windowObservers: [NSObjectProtocol] = []
     private var tabVisible = false
     private var windowVisible = true
+    private var hudActive = false
 
     init() {
         sim.reduceMotion = reduceMotion
@@ -166,6 +174,14 @@ final class AppearancePreviewEngine: ObservableObject {
         recomputeRunning()
     }
 
+    /// True while a real dictation is recording/streaming/transcribing - the HUD is rendering on
+    /// main then, and the preview (same process, same main thread) must yield to it rather than
+    /// run two Canvas/sim workloads at once.
+    func setHUDActive(_ active: Bool) {
+        hudActive = active
+        recomputeRunning()
+    }
+
     /// Attaches window-level observers exactly once per window (the `WindowAccessor` reports the
     /// window on every SwiftUI update, not just once).
     func attach(window: NSWindow?) {
@@ -191,7 +207,7 @@ final class AppearancePreviewEngine: ObservableObject {
         if let window {
             windowVisible = window.occlusionState.contains(.visible) && !window.isMiniaturized && !NSApp.isHidden
         }
-        running = tabVisible && windowVisible
+        running = tabVisible && windowVisible && !hudActive
     }
 
     func advance(to date: Date, mascot: Mascot) -> PopcornRenderer.SceneInput {

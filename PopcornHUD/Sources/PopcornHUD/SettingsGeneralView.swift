@@ -11,7 +11,10 @@ struct SettingsGeneralView: View {
     /// `DictationHealthMonitor`, so both a healthy and an issue state can be rendered offscreen.
     var fixtureStatus: DictationStatus?
 
-    @State private var loginEnabled = LoginItem.isEnabled
+    // Starts false and is corrected by an async probe in onAppear - SMAppService.status is a
+    // synchronous XPC round trip and must not run on the main thread during view init.
+    @State private var loginEnabled = false
+    @State private var loginItemError: String?
     @State private var status = DictationStatus(daemon: .missing, facts: EngineFacts())
     @State private var showClearHistoryConfirm = false
     @State private var clearHistoryError: String?
@@ -29,14 +32,24 @@ struct SettingsGeneralView: View {
                 Toggle("Open VoicePop at Login", isOn: $loginEnabled)
                     .disabled(!LoginItem.isAvailable)
                     .onChange(of: loginEnabled) { newValue in
-                        LoginItem.setEnabled(newValue)
-                        loginEnabled = LoginItem.isEnabled
+                        // Optimistic: the switch already shows newValue. Revert it and show an
+                        // inline error if the XPC call fails, instead of blocking on it here.
+                        loginItemError = nil
+                        LoginItem.setEnabledAsync(newValue) { result in
+                            if case .failure(let error) = result {
+                                loginEnabled = !newValue
+                                loginItemError = error.localizedDescription
+                            }
+                        }
                     }
                     .accessibilityHint(LoginItem.isAvailable ? "" : loginUnavailableReason)
                 if !LoginItem.isAvailable {
                     Text(loginUnavailableReason)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if let loginItemError {
+                    Text(loginItemError).font(.caption).foregroundStyle(.red)
                 }
             }
 
@@ -78,7 +91,7 @@ struct SettingsGeneralView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            loginEnabled = LoginItem.isEnabled
+            LoginItem.isEnabledAsync { loginEnabled = $0 }
             health?.addListener { newStatus in
                 status = newStatus
             }
@@ -119,7 +132,8 @@ struct SettingsGeneralView: View {
             }
         case .openSettings: break
         case .copyLastText:
-            if let text = HistoryStore.last()?.out {
+            LastHistoryEntryCache.currentAsync { entry in
+                guard let text = entry?.out else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
             }

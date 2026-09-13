@@ -59,7 +59,7 @@ final class SettingsWindowController {
             case .general:
                 hosting = NSHostingController(rootView: SettingsGeneralView(store: store, health: health))
             case .appearance:
-                hosting = NSHostingController(rootView: SettingsAppearanceView(store: store))
+                hosting = NSHostingController(rootView: SettingsAppearanceView(store: store, health: health))
             case .dictation:
                 hosting = NSHostingController(rootView: SettingsDictationView(store: store))
             case .learnedWords:

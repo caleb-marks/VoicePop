@@ -100,6 +100,59 @@ public enum HistoryStore {
     }
 }
 
+/// Process-wide cache of `HistoryStore.last()`, so the menu (opened often, and on every idle
+/// transition) and "Fix Last Dictation"/"Copy Last Text" never do a synchronous `history.jsonl`
+/// tail-read on the main thread. Mirrors `StylePrefsCache`'s generation-guarded refresh pattern.
+public enum LastHistoryEntryCache {
+    private static let lock = NSLock()
+    private static var cached: HistoryEntry?
+    private static var loaded = false
+    private static var generation: UInt64 = 0
+
+    /// Cached value only - never touches disk. `nil` both "no dictation yet" and "not loaded
+    /// yet"; callers that must tell those apart use `currentAsync`.
+    public static func current() -> HistoryEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cached
+    }
+
+    /// Delivers the cached value on the main queue immediately if it has been loaded at least
+    /// once; otherwise loads off-main first. Use for a one-off action (Copy Last Text) where the
+    /// cache might still be cold (e.g. right after launch).
+    public static func currentAsync(completion: @escaping (HistoryEntry?) -> Void) {
+        lock.lock()
+        let isLoaded = loaded
+        let value = cached
+        lock.unlock()
+        if isLoaded {
+            DispatchQueue.main.async { completion(value) }
+        } else {
+            refreshAsync(completion: completion)
+        }
+    }
+
+    /// Re-reads `history.jsonl` off the main thread and updates the cache; safe to call often
+    /// (idle transitions, a transcript-ready signal). `completion`, if given, always runs on main.
+    public static func refreshAsync(completion: ((HistoryEntry?) -> Void)? = nil) {
+        lock.lock()
+        generation &+= 1
+        let stamp = generation
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let value = HistoryStore.last()
+            lock.lock()
+            if generation == stamp {
+                cached = value
+                loaded = true
+            }
+            let result = cached
+            lock.unlock()
+            if let completion { DispatchQueue.main.async { completion(result) } }
+        }
+    }
+}
+
 /// Reads only the tail of a growing JSONL file. A partial first line is dropped, which is
 /// safe because callers only ever want whole trailing records.
 enum TailReader {
