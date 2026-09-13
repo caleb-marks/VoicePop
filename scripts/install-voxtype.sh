@@ -4,6 +4,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MIN_VER="1.0.1"
+# Pinned from upstream v1.0.1 SHA256SUMS-macos.txt and GitHub asset metadata.
+# Update together with MIN_VER after reviewing the upstream release.
+VOXTYPE_SHA256="275df56b1e9463d8c8888d208bcfae4ed2ab4cb5aa0177dbfc6044d4b8d3ae78"
 APP_BIN="/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"
 FORCE="${VOXTYPE_FORCE:-0}"
 
@@ -50,17 +53,22 @@ if [[ -z "${INSTALLED}" ]] || ! version_ge "$INSTALLED" "$MIN_VER"; then
   mkdir -p "$CACHE"
   BIN="$CACHE/voxtype-${MIN_VER}-macos-universal"
   if [[ ! -f "$BIN" ]]; then
-    curl -fsSL -o "$BIN" \
+    DOWNLOAD="$(mktemp "$CACHE/voxtype-download.XXXXXX")"
+    trap 'rm -f "$DOWNLOAD"' EXIT
+    curl --proto '=https' --proto-redir '=https' -fsSL -o "$DOWNLOAD" \
       "https://github.com/peteonrails/voxtype/releases/download/v${MIN_VER}/voxtype-${MIN_VER}-macos-universal"
+    printf '%s  %s\n' "$VOXTYPE_SHA256" "$DOWNLOAD" | shasum -a 256 -c -
+    mv "$DOWNLOAD" "$BIN"
+    trap - EXIT
   fi
+  # Recheck cached files too, before granting execute permission or installing.
+  printf '%s  %s\n' "$VOXTYPE_SHA256" "$BIN" | shasum -a 256 -c -
   chmod +x "$BIN"
-  xattr -dr com.apple.quarantine "$BIN" || true
   PREFIX="$(brew --prefix 2>/dev/null || true)"
   if [[ -n "$PREFIX" && -w "$PREFIX/bin" ]]; then
     rm -f "$PREFIX/bin/voxtype"
     cp "$BIN" "$PREFIX/bin/voxtype"
     chmod +x "$PREFIX/bin/voxtype"
-    xattr -dr com.apple.quarantine "$PREFIX/bin/voxtype" || true
   fi
 fi
 

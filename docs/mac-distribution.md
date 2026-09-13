@@ -20,6 +20,8 @@ export VOICEPOP_NOTARY_PROFILE=voicepop-notary
 
 `./scripts/package-app.sh` without a signing identity remains available for local ad-hoc development. Those builds must not be published as notarized releases.
 
+`make-release.sh` requires the Swift tests to pass before packaging and runs `verify-release-artifacts.sh` on the final ZIP and DMG before writing checksums or reporting success. This checks required bundle contents, embedded home paths, and code signatures.
+
 Upload the versioned DMG, ZIP, `VoicePop.dmg`, and `SHA256SUMS` from dist to the new GitHub release. Once the stable asset exists in the latest release, change the README download button to:
 
 https://github.com/caleb-marks/VoicePop/releases/latest/download/VoicePop.dmg
