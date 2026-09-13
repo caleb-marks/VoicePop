@@ -281,3 +281,22 @@ final class EngineProbeResultTests: XCTestCase {
         XCTAssertTrue(EngineProbeResult(binaryInstalled: true, configuredEngine: "parakeet").engineUsable, "unknown compile state stays optimistic")
     }
 }
+
+final class VoxtypeConfigScanTests: XCTestCase {
+    func testFindsPostProcessCommandOnlyInItsSection() {
+        let toml = """
+        engine = "parakeet"
+        [output]
+        command = "not-this"
+        [output.post_process]
+        # command = "/old/voxtype-clean"
+        command = "/Users/example/VoicePop/bin/voxtype-clean"   # trailing comment
+        timeout_ms = 5000
+        [vad]
+        command = "nope"
+        """
+        XCTAssertEqual(VoxtypeConfigScan.postProcessCommand(in: toml), "/Users/example/VoicePop/bin/voxtype-clean")
+        XCTAssertNil(VoxtypeConfigScan.postProcessCommand(in: "[output.post_process]\n# command = \"x\"\n"))
+        XCTAssertNil(VoxtypeConfigScan.postProcessCommand(in: "engine = \"whisper\"\n"))
+    }
+}

@@ -198,3 +198,28 @@ public struct EngineProbeResult: Equatable, Sendable {
         return nil
     }
 }
+
+/// Minimal read-only scan of Voxtype's TOML config for the values health checks need.
+public enum VoxtypeConfigScan {
+    /// `command` under `[output.post_process]`, or nil when absent or commented out.
+    public static func postProcessCommand(in toml: String) -> String? {
+        var section = ""
+        for rawLine in toml.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if line.hasPrefix("[") {
+                section = line.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                continue
+            }
+            guard section == "output.post_process" else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces) == "command" else { continue }
+            var value = parts[1].trimmingCharacters(in: .whitespaces)
+            guard value.hasPrefix("\"") else { return nil }
+            value.removeFirst()
+            guard let end = value.firstIndex(of: "\"") else { return nil }
+            return String(value[..<end])
+        }
+        return nil
+    }
+}
