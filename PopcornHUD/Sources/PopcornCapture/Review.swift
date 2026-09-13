@@ -26,6 +26,17 @@ enum Review {
         }
         stills.append(("loud-reducemotion", PopcornCapture.scene(PopcornCapture.reducedMotionSnapshot(peak: 0.28), reduceMotion: true)))
         stills.append(("transcribing", PopcornCapture.transcribingScene(mascot: .popcorn)))
+        // Status-chrome edge cases: the "Audio levels unavailable" detail line under the capsule
+        // (drawn on a plate so it survives busy/dark backdrops), and an unusual daemon-state
+        // label that must truncate inside the capsule instead of spilling past it.
+        if let lastRecording = stills.first(where: { $0.0 == "normal" })?.1 {
+            var withDetail = lastRecording
+            withDetail.detail = "Audio levels unavailable"
+            stills.append(("detail", withDetail))
+            var longLabel = lastRecording
+            longLabel.label = "Waiting For Microphone Device Permission"
+            stills.append(("longlabel", longLabel))
+        }
 
         for (name, scene) in stills {
             for bg in PopcornCapture.Backdrop.allCases {

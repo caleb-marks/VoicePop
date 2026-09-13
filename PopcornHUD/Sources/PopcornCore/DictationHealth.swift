@@ -152,6 +152,14 @@ public struct DictationStatus: Equatable, Sendable {
         }
     }
 
+    /// The one rule for the secondary line under the headline (menu detail row, Settings →
+    /// General): an issue's explanation or an informational download wins; otherwise the
+    /// in-use model title, if known; otherwise nothing.
+    public func secondaryLine(modelTitle: String?) -> String? {
+        if let detail { return detail }
+        return issue == nil ? modelTitle : nil
+    }
+
     /// Optional second line explaining the headline and what to do. nil when there is nothing to add.
     public var detail: String? {
         switch issue {

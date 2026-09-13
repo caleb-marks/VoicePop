@@ -221,11 +221,20 @@ public enum PopcornRenderer {
             let detail = Text(scene.detail)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundColor(PaletteUI.popcornInk.opacity(0.78))
-            ctx.draw(
-                detail,
-                at: CGPoint(x: cx, y: visibleBottom + Tunables.capsuleH + 16),
-                anchor: .center
+            let center = CGPoint(x: cx, y: visibleBottom + Tunables.capsuleH + 16)
+            // A small plate matching the capsule surface: the 10 pt red text was drawn straight
+            // onto the desktop and vanished on busy or dark wallpapers.
+            let size = ctx.resolve(detail).measure(in: CGSize(width: Tunables.cardW, height: 40))
+            let plate = CGRect(
+                x: center.x - size.width / 2 - 8,
+                y: center.y - size.height / 2 - 3,
+                width: size.width + 16,
+                height: size.height + 6
             )
+            let platePath = Path(roundedRect: plate, cornerRadius: plate.height / 2)
+            ctx.fill(platePath, with: .color(PaletteUI.popcornStatusSurface.opacity(0.88)))
+            ctx.stroke(platePath, with: .color(PaletteUI.popcornFineEdge.opacity(0.6)), lineWidth: 0.5)
+            ctx.draw(detail, at: center, anchor: .center)
         }
     }
 
@@ -573,8 +582,25 @@ public enum PopcornRenderer {
             design: premium ? .default : .rounded
         )
         let textColor = premium ? PaletteUI.popcornStatusText : PaletteUI.bagRed
-        let resolvedText = ctx.resolve(Text(label).font(textFont).foregroundColor(textColor))
-        let textWidth = resolvedText.measure(in: CGSize(width: rect.width, height: rect.height)).width
+        let dotR: CGFloat = premium ? 2.8 : 3.5
+        // Resolving needs the (inout) context, so measure through a local non-escaping helper.
+        func measureWidth(_ s: String, in c: GraphicsContext) -> CGFloat {
+            c.resolve(Text(s).font(textFont).foregroundColor(textColor))
+                .measure(in: CGSize(width: 1000, height: rect.height)).width
+        }
+        // Fit the label to the capsule: the known labels ("Recording", "Transcribing…") fit and
+        // take exactly the old path; only an unusual daemon state string gets truncated instead
+        // of spilling past the capsule's edges.
+        let inset: CGFloat = 12
+        let dotSpace: CGFloat = showDot ? (premium ? dotR * 2 + 7 : 22) : 0
+        let maxTextWidth = rect.width - inset * 2 - dotSpace
+        var label = label
+        var textWidth = measureWidth(label, in: ctx)
+        if textWidth > maxTextWidth {
+            let snapshot = ctx
+            label = CapsuleLabel.fitted(label, maxWidth: maxTextWidth) { measureWidth($0, in: snapshot) }
+            textWidth = measureWidth(label, in: ctx)
+        }
         let textX: CGFloat
         if showDot {
             let pulse: Double
@@ -583,7 +609,6 @@ public enum PopcornRenderer {
             } else {
                 pulse = 0.55 + 0.45 * (0.5 + 0.5 * sin(bobPhase * 6))
             }
-            let dotR: CGFloat = premium ? 2.8 : 3.5
             let dotX: CGFloat
             if premium {
                 let gap: CGFloat = 7

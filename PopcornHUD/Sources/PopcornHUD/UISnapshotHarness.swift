@@ -222,6 +222,15 @@ enum UISnapshotHarness {
             SettingsLearnedWordsView(initialSearch: "voice")
         }
 
+        // Empty file and a search with no hits: both used to render as a blank list.
+        let empty = LearnedWordsViewModel()
+        capture(name: "learned-words-empty", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
+            SettingsLearnedWordsView(fixtureModel: empty)
+        }
+        capture(name: "learned-words-no-results", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
+            SettingsLearnedWordsView(initialSearch: "zzzz")
+        }
+
         let erroring = LearnedWordsViewModel()
         erroring.load()
         erroring.saveError = "Couldn\u{2019}t save learned words. The disk is full."

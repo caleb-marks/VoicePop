@@ -14,7 +14,9 @@ enum StatusItemIcon {
         }
     }
 
-    static func image(pointSize: CGFloat, mascot: Mascot = .popcorn) -> NSImage {
+    /// `recording` adds a small red dot (white ring for contrast on light and dark menu bars) at
+    /// the bottom-right, so the menu bar itself shows that VoicePop is listening.
+    static func image(pointSize: CGFloat, mascot: Mascot = .popcorn, recording: Bool = false) -> NSImage {
         let glyph = glyph(for: mascot)
         let image = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
             NSColor.clear.setFill()
@@ -33,6 +35,15 @@ enum StatusItemIcon {
                 x: (rect.width - textSize.width) / 2,
                 y: (rect.height - textSize.height) / 2
             ))
+            if recording {
+                let r = rect.width * 0.14
+                let ring: CGFloat = 0.75
+                let dot = NSRect(x: rect.maxX - r * 2 - 0.5, y: rect.minY + 0.5, width: r * 2, height: r * 2)
+                NSColor.white.setFill()
+                NSBezierPath(ovalIn: dot.insetBy(dx: -ring, dy: -ring)).fill()
+                NSColor.systemRed.setFill()
+                NSBezierPath(ovalIn: dot).fill()
+            }
             return true
         }
         image.isTemplate = false

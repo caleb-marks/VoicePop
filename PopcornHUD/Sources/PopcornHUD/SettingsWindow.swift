@@ -80,7 +80,8 @@ final class SettingsWindowController {
 
         let window = NSWindow(contentViewController: tabs)
         window.title = "VoicePop Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setFrameAutosaveName("VoicePopSettings")
         // 620 tall: the Dictation tab (6 models + writing style + polishing toggle) and General
         // (shortcut guidance + live recovery actions) both clip important content at 460 - a
         // download's progress row in particular must not require scrolling to notice.

@@ -7,7 +7,7 @@ private final class CorrectionPanel: NSWindow {
     }
 }
 
-/// The "Fix last text" editor (§4 of the polish spec). Save & Learn only teaches future
+/// The "Fix Last Dictation" editor (§4 of the polish spec). Save & Learn only teaches future
 /// dictation - it never touches text already inserted elsewhere - so the window explains that,
 /// offers a literal "Copy Corrected Text" action, and keeps the window and its contents open on
 /// a save failure with an inline, actionable error and Retry.
@@ -130,11 +130,13 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     private func buildWindow() {
         let window = CorrectionPanel(
             contentRect: NSRect(x: 0, y: 0, width: 540, height: 380),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Fix last text"
+        // Same name as the menu item that opens it ("Fix Last Dictation…").
+        window.title = "Fix Last Dictation"
+        window.minSize = NSSize(width: 440, height: 300)
         window.level = .floating
         window.isReleasedWhenClosed = false
         window.delegate = self

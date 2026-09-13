@@ -116,6 +116,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         cancelMenuItem?.isEnabled = state.isHot
         lastStatus = status
         statusMenuItem?.title = status.headline
+        applyDetailLine(for: status)
         rebuildRecoveryItemsForSnapshot(in: menu, actions: status.actions)
         updateRecordEnabled()
         return menu
@@ -137,11 +138,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if state.isHot && !lastState.isHot, OllamaWarmer.formalInEffect(prefs) {
             OllamaWarmer.shared.ensureWarm(prefs.llm)
         }
+        let wasHot = lastState.isHot
         lastState = state
         recordMenuItem?.title = state.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isHidden = !state.isHot
         cancelMenuItem?.isEnabled = state.isHot
         updateRecordEnabled()
+        // Only rebuild the icon image on a hot/idle edge, not on every state tick.
+        if wasHot != state.isHot { refreshMascotIcon() }
         if !state.isHot, !state.isTranscribing {
             reloadFixLastItem()
         }
@@ -153,14 +157,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         lastStatus = status
         statusMenuItem?.title = status.headline
         statusMenuItem?.setAccessibilityLabel(status.headline)
-        if let title = modelShortTitle, status.issue == nil {
-            detailMenuItem?.title = title
+        applyDetailLine(for: status)
+        rebuildRecoveryItems(for: status.actions)
+        updateRecordEnabled()
+    }
+
+    /// Second menu line: `DictationStatus.secondaryLine` - the issue's explanation (previously
+    /// computed by `DictationHealth` but shown nowhere), else the in-use model title.
+    private func applyDetailLine(for status: DictationStatus) {
+        if let line = status.secondaryLine(modelTitle: modelShortTitle) {
+            detailMenuItem?.title = line
+            detailMenuItem?.setAccessibilityLabel(line)
             detailMenuItem?.isHidden = false
         } else {
             detailMenuItem?.isHidden = true
         }
-        rebuildRecoveryItems(for: status.actions)
-        updateRecordEnabled()
     }
 
     /// Start Recording does nothing useful when dictation can't currently start (L-10) - offering
@@ -359,6 +370,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         StylePrefsCache.refreshAsync()
         reloadFixLastItem()
         statusItem?.button?.toolTip = "VoicePop - \(prefs.resolve(app: targetApp).rawValue.capitalized)"
+            + (lastState.isHot ? " · Recording" : "")
     }
 
     /// Refreshes the cached current-model title (for the menu's disabled detail line) off the
@@ -393,7 +405,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         savePrefs()
     }
     private func refreshMascotIcon() {
-        statusItem?.button?.image = StatusItemIcon.image(pointSize: 18, mascot: prefs.mascot)
+        guard let button = statusItem?.button else { return }
+        let recording = lastState.isHot
+        button.image = StatusItemIcon.image(pointSize: 18, mascot: prefs.mascot, recording: recording)
+        button.setAccessibilityLabel(recording ? "VoicePop, recording" : "VoicePop")
     }
     private func savePrefs() {
         do {

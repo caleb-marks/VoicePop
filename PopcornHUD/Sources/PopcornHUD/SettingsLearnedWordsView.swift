@@ -76,28 +76,26 @@ struct SettingsLearnedWordsView: View {
             // harness: the filtering worked, but no search box appeared anywhere) - macOS 13's
             // searchable requires navigation-view participation this window doesn't have. A
             // plain field works everywhere.
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search learned words", text: $search)
-                    .textFieldStyle(.plain)
-                if !search.isEmpty {
-                    Button {
-                        search = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
-            .padding([.horizontal, .top], 12)
-            .padding(.bottom, 4)
-
             List(selection: $selection) {
+                // The search field lives inside the List so it gets the same grouped chrome as
+                // the other tabs' Forms instead of a hand-drawn rounded box above the list.
+                Section {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search learned words", text: $search)
+                            .textFieldStyle(.plain)
+                        if !search.isEmpty {
+                            Button {
+                                search = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Clear search")
+                        }
+                    }
+                }
                 Section {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -118,11 +116,18 @@ struct SettingsLearnedWordsView: View {
                     }
                 }
                 Section {
-                    // Index, not \.from (a hand-edited file can have duplicate `from` keys, which
-                    // would otherwise give ForEach duplicate identities).
-                    ForEach(Array(filtered.enumerated()), id: \.offset) { _, entry in
-                        row(entry)
-                            .tag(entry.from)
+                    if model.entries.isEmpty {
+                        emptyRow("No learned words yet",
+                                 hint: "Corrections you save with Fix Last Dictation\u{2026} appear here.")
+                    } else if filtered.isEmpty {
+                        emptyRow("No matches for \u{201c}\(search)\u{201d}", hint: nil)
+                    } else {
+                        // Index, not \.from (a hand-edited file can have duplicate `from` keys,
+                        // which would otherwise give ForEach duplicate identities).
+                        ForEach(Array(filtered.enumerated()), id: \.offset) { _, entry in
+                            row(entry)
+                                .tag(entry.from)
+                        }
                     }
                 }
             }
@@ -143,6 +148,21 @@ struct SettingsLearnedWordsView: View {
                 .padding(8)
             }
         }
+    }
+
+    /// Empty and no-results states: previously the list simply went blank with no explanation.
+    private func emptyRow(_ title: String, hint: String?) -> some View {
+        VStack(spacing: 4) {
+            Text(title).foregroundStyle(.secondary)
+            if let hint {
+                Text(hint).font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
     }
 
     private var filtered: [Replacement] {

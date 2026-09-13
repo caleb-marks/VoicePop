@@ -370,3 +370,34 @@ final class VoxtypeConfigScanTests: XCTestCase {
         XCTAssertNil(VoxtypeConfigScan.postProcessCommand(in: "engine = \"whisper\"\n"))
     }
 }
+
+final class DictationSecondaryLineTests: XCTestCase {
+    private let ready = EngineFacts(engineInstalled: true, modelInstalled: true, modelTitle: "Parakeet")
+
+    func testHealthyShowsModelTitle() {
+        let s = DictationStatus(daemon: .idle, facts: ready)
+        XCTAssertEqual(s.secondaryLine(modelTitle: "Parakeet"), "Parakeet")
+        XCTAssertNil(s.secondaryLine(modelTitle: nil))
+    }
+
+    func testDetailWinsOverModelTitle() {
+        // A dead daemon: the explanation, not the model name.
+        let dead = DictationStatus(daemon: .missing, facts: ready)
+        XCTAssertEqual(dead.secondaryLine(modelTitle: "Parakeet"), "Restart dictation to try again.")
+
+        // Healthy, but another model is downloading: informational detail still wins.
+        var f = ready
+        f.configuredModel = "parakeet-tdt-0.6b-v3-int8"
+        f.download = .init(model: "whisper-large-v3-turbo", fraction: 0.25)
+        let downloading = DictationStatus(daemon: .idle, facts: f)
+        XCTAssertNil(downloading.issue)
+        XCTAssertEqual(downloading.secondaryLine(modelTitle: "Parakeet"), "Downloading “whisper-large-v3-turbo”… 25%")
+    }
+
+    func testBlockedIssueNeverFallsBackToModelTitle() {
+        let s = DictationStatus(daemon: .idle, facts: EngineFacts(engineInstalled: false))
+        XCTAssertNotNil(s.issue)
+        XCTAssertEqual(s.secondaryLine(modelTitle: "Parakeet"), s.detail)
+        XCTAssertNotEqual(s.secondaryLine(modelTitle: "Parakeet"), "Parakeet")
+    }
+}
