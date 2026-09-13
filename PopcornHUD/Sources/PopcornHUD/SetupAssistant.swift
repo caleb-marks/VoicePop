@@ -79,7 +79,7 @@ enum SetupAssistant {
 
     /// The engine may report a packaged variant (e.g. `…-int8-prepacked`) of the default model.
     static func modelInstalled() -> Bool {
-        VoxtypeModel.installedNames().contains { $0 == modelName || $0.hasPrefix(modelName + "-") }
+        ModelIdentity.isInstalled(modelName, in: VoxtypeModel.installedNames())
     }
 
     private static func isParakeetCapable(_ bin: String) -> Bool {
