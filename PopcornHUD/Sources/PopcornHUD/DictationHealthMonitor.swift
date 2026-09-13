@@ -18,10 +18,20 @@ extension Notification.Name {
 ///   transcript-ready signal, menu record requests, and per-recording levels from the HUD. One
 ///   one-shot timer is armed only while the tracker has a pending deadline.
 final class DictationHealthMonitor {
+    /// Returned by the `add…Listener` methods; pass to `removeListener(_:)`.
+    struct ListenerToken: Hashable {
+        fileprivate let id: Int
+    }
+
     private let watcher: StateWatcher
     private let probe: () -> EngineProbeResult
     private let probeQueue = DispatchQueue(label: "com.caleb.voicepop.health", qos: .utility)
-    private var listeners: [(DictationStatus) -> Void] = []
+    private var listeners: [(id: Int, block: (DictationStatus) -> Void)] = []
+    private var transcriptReadyListeners: [(id: Int, block: () -> Void)] = []
+    private var historyAppendedListeners: [(id: Int, block: () -> Void)] = []
+    private var nextListenerID = 0
+    /// Wall-clock start of the current or last recording, to match history entries to it.
+    private var sessionStart: Date?
     private var facts = EngineFacts()
     private(set) var status = DictationStatus(daemon: .missing, facts: EngineFacts())
 
@@ -50,9 +60,41 @@ final class DictationHealthMonitor {
     }
 
     /// Main thread. Calls `block` immediately with the current status, then on every change.
-    func addListener(_ block: @escaping (DictationStatus) -> Void) {
-        listeners.append(block)
+    @discardableResult
+    func addListener(_ block: @escaping (DictationStatus) -> Void) -> ListenerToken {
+        let token = makeToken()
+        listeners.append((token.id, block))
         block(status)
+        return token
+    }
+
+    /// Main thread. voxtype-clean finished a transcript (before Voxtype types it). One Darwin
+    /// observer here fans the signal out, so other components need not register their own.
+    @discardableResult
+    func addTranscriptReadyListener(_ block: @escaping () -> Void) -> ListenerToken {
+        let token = makeToken()
+        transcriptReadyListeners.append((token.id, block))
+        return token
+    }
+
+    /// Main thread. voxtype-clean appended the dictation to history (`HistoryStore.last()` is current).
+    @discardableResult
+    func addHistoryAppendedListener(_ block: @escaping () -> Void) -> ListenerToken {
+        let token = makeToken()
+        historyAppendedListeners.append((token.id, block))
+        return token
+    }
+
+    /// Main thread. Removes a listener added by any `add…Listener` method; unknown tokens are ignored.
+    func removeListener(_ token: ListenerToken) {
+        listeners.removeAll { $0.id == token.id }
+        transcriptReadyListeners.removeAll { $0.id == token.id }
+        historyAppendedListeners.removeAll { $0.id == token.id }
+    }
+
+    private func makeToken() -> ListenerToken {
+        nextListenerID += 1
+        return ListenerToken(id: nextListenerID)
     }
 
     /// Main thread.
@@ -73,18 +115,21 @@ final class DictationHealthMonitor {
         observe(NSWorkspace.shared.notificationCenter, NSWorkspace.didWakeNotification) { [weak self] _ in
             self?.requestProbe(minIntervalMs: 5000)
         }
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let monitor = Unmanaged<DictationHealthMonitor>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { monitor.transcriptReady() }
-            },
-            VoicePopSignal.transcriptReady as CFString,
-            nil,
-            .deliverImmediately
-        )
+        for signal in [VoicePopSignal.transcriptReady, VoicePopSignal.historyAppended] {
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                Unmanaged.passUnretained(self).toOpaque(),
+                { _, observer, name, _, _ in
+                    guard let observer, let name else { return }
+                    let monitor = Unmanaged<DictationHealthMonitor>.fromOpaque(observer).takeUnretainedValue()
+                    let signal = name.rawValue as String
+                    DispatchQueue.main.async { monitor.darwinSignal(signal) }
+                },
+                signal as CFString,
+                nil,
+                .deliverImmediately
+            )
+        }
         refresh()
     }
 
@@ -125,6 +170,7 @@ final class DictationHealthMonitor {
 
     private func daemonChanged(_ state: DaemonState) {
         let previous = status.daemon
+        if state.isHot, !previous.isHot { sessionStart = Date() }
         tracker.stateChanged(state, atMs: Timing.nowMs())
         if !state.isHot { facts.audioLevelsUnavailable = false }
         syncTracker(daemon: state)
@@ -134,16 +180,43 @@ final class DictationHealthMonitor {
         }
     }
 
-    private func transcriptReady() {
-        tracker.transcriptReady(atMs: Timing.nowMs())
-        syncTracker()
+    private func darwinSignal(_ signal: String) {
+        switch signal {
+        case VoicePopSignal.transcriptReady:
+            tracker.transcriptReady(atMs: Timing.nowMs())
+            syncTracker()
+            transcriptReadyListeners.forEach { $0.block() }
+        case VoicePopSignal.historyAppended:
+            if trackerFailure != nil { checkHistoryForFailedSession() }
+            historyAppendedListeners.forEach { $0.block() }
+        default:
+            break
+        }
+    }
+
+    /// Off main: does history hold text from the failed dictation? Only then is copy offered.
+    private func checkHistoryForFailedSession() {
+        guard let failure = trackerFailure, failure != .didNotStart, let start = sessionStart else { return }
+        probeQueue.async { [weak self] in
+            let hasText = HistoryStore.last().map {
+                DictationSessionTracker.historyEntry(ts: $0.ts, isFromSessionStartedAt: start)
+                    && !$0.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            } ?? false
+            DispatchQueue.main.async {
+                guard let self, self.trackerFailure == failure, self.sessionStart == start else { return }
+                self.update { $0.lastFailureHasText = hasText }
+            }
+        }
     }
 
     private func syncTracker(daemon: DaemonState? = nil) {
         // Only overwrite facts the tracker changed, so other writers of `update` are preserved.
+        var failureChanged = false
         if tracker.failure != trackerFailure {
             trackerFailure = tracker.failure
             facts.lastFailure = tracker.failure?.rawValue
+            facts.lastFailureHasText = false
+            failureChanged = true
         }
         if tracker.microphoneSilent != trackerMicrophoneSilent {
             trackerMicrophoneSilent = tracker.microphoneSilent
@@ -152,6 +225,7 @@ final class DictationHealthMonitor {
         }
         publish(daemon: daemon ?? status.daemon)
         armDeadline()
+        if failureChanged { checkHistoryForFailedSession() }
     }
 
     private func armDeadline() {
@@ -216,7 +290,7 @@ final class DictationHealthMonitor {
             Timing.event("health.issue", ["issue": next.issue.map { String(describing: $0).split(separator: "(").first.map(String.init) ?? "" } ?? "none"])
         }
         status = next
-        for cb in listeners { cb(next) }
+        for listener in listeners { listener.block(next) }
     }
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name, _ block: @escaping (Notification) -> Void) {

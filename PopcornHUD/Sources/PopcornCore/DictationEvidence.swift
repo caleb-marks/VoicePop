@@ -61,6 +61,13 @@ public struct DictationSessionTracker: Equatable, Sendable {
         return [start, stuck, noTextCheckMs].compactMap { $0 }.min()
     }
 
+    /// Whether a history entry stamped `ts` (ISO-8601, second precision) belongs to a dictation
+    /// that started at `sessionStart` or later.
+    public static func historyEntry(ts: String, isFromSessionStartedAt sessionStart: Date) -> Bool {
+        guard let date = ISO8601DateFormatter().date(from: ts) else { return false }
+        return date >= sessionStart.addingTimeInterval(-1)
+    }
+
     public mutating func recordRequested(start: Bool, atMs now: UInt64) {
         guard start, state == .idle else { return }
         pendingStartMs = now
@@ -185,16 +192,19 @@ public struct EngineProbeResult: Equatable, Sendable {
     }
 
     /// Whether the configured model is on disk: true/false only with evidence, nil when unknown.
+    /// Packaged variants (e.g. `…-int8-prepacked`) match their catalog model via `ModelIdentity`;
+    /// different quantizations (`…-v3` vs `…-v3-int8`) never match each other.
     public var modelInstalled: Bool? {
         guard let model = configuredModel, !model.isEmpty else { return nil }
         if model.hasPrefix("/") { return configuredModelPathExists }
-        let installed = Set((catalog ?? [:]).values.flatMap { $0.filter(\.value).map(\.key) })
-        if installed.contains(model) { return true }
-        if let local = localModelEntries, local.contains(model) || local.contains("ggml-\(model).bin") { return true }
-        let engineCatalog = configuredEngine.flatMap { catalog?[$0] }
-        if engineCatalog?[model] == false { return false }
-        // Local variants such as "<catalog-name>-prepacked" are not listed in the catalog.
-        if installed.contains(where: { model.hasPrefix($0 + "-") }) { return true }
+        let installed = (catalog ?? [:]).values.flatMap { $0.filter(\.value).map(\.key) }
+        if ModelIdentity.isInstalled(model, in: installed) { return true }
+        if let local = localModelEntries {
+            let names = local.map { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") ? String($0.dropFirst(5).dropLast(4)) : $0 }
+            if ModelIdentity.isInstalled(model, in: names) { return true }
+        }
+        let engineCatalog = configuredEngine.flatMap { catalog?[$0] } ?? [:]
+        if engineCatalog.keys.contains(where: { ModelIdentity.same($0, model) }) { return false }
         return nil
     }
 }

@@ -29,6 +29,9 @@ public struct EngineFacts: Equatable, Sendable {
     public var audioLevelsUnavailable: Bool
     /// Last distinguishable transcription/insertion failure, cleared by the next success.
     public var lastFailure: String?
+    /// True when history holds text from the failed dictation (e.g. voxtype-clean finished but the
+    /// daemon died or stalled before typing), so copying it is meaningful.
+    public var lastFailureHasText: Bool = false
 
     public init(
         engineInstalled: Bool = true,
@@ -69,6 +72,8 @@ public enum DictationIssue: Equatable, Sendable {
 public enum RecoveryAction: String, Equatable, Sendable, CaseIterable {
     case openSetup
     case restartEngine
+    /// Not emitted by `DictationStatus.actions` (downloads recover through `.openSettings`); kept so
+    /// existing menu/Settings handlers stay valid.
     case retryDownload
     case openPrivacySettings
     case openSettings
@@ -148,8 +153,15 @@ public struct DictationStatus: Equatable, Sendable {
         case .lastDictationFailed(let message):
             switch DictationFailure(rawValue: message) {
             case .noText: return "VoicePop didn’t receive text from it. Try again, speaking a little longer."
-            case .didNotStart, .stoppedUnexpectedly: return "Try again. If it keeps happening, restart dictation."
-            case .transcriptionStuck: return "Wait a moment, or restart dictation."
+            case .didNotStart: return "Try again. If it keeps happening, restart dictation."
+            case .stoppedUnexpectedly:
+                return facts.lastFailureHasText
+                    ? "Its text was saved. Copy it, or restart dictation."
+                    : "Try again. If it keeps happening, restart dictation."
+            case .transcriptionStuck:
+                return facts.lastFailureHasText
+                    ? "Its text was saved. Copy it, wait a moment, or restart dictation."
+                    : "Wait a moment, or restart dictation."
             case nil: return message
             }
         case .audioLevelsUnavailable:
@@ -166,8 +178,12 @@ public struct DictationStatus: Equatable, Sendable {
         case .engineNotRunning: return [.restartEngine, .openSetup]
         case .permissionsNeeded: return [.openPrivacySettings, .openSetup]
         case .lastDictationFailed(let message):
-            // Known failures produced no new text, so copying would copy an older dictation.
-            return DictationFailure(rawValue: message) == nil ? [.copyLastText, .restartEngine] : [.restartEngine]
+            // Offer copy only when history holds this dictation's text; otherwise it would copy an
+            // older dictation. Unknown failure strings come from other writers and keep copy.
+            if DictationFailure(rawValue: message) == nil || facts.lastFailureHasText {
+                return [.copyLastText, .restartEngine]
+            }
+            return [.restartEngine]
         case .audioLevelsUnavailable: return [.restartEngine]
         case nil: return []
         }

@@ -32,7 +32,10 @@ enum EngineControl {
     static func record(_ command: RecordCommand) {
         Timing.event("record.request", ["cmd": command.rawValue])
         NotificationCenter.default.post(name: .voicePopRecordRequested, object: nil, userInfo: ["command": command.rawValue])
-        processQueue.async { runDetached(voxtypeBin, ["record", command.rawValue]) }
+        processQueue.async {
+            guard isEngineInstalled else { return }
+            ProcessRunner.spawnDetached(voxtypeBin, ["record", command.rawValue])
+        }
     }
 
     /// Starts the daemon at launch when nothing else did (reboot/logout). Checks run off main.
@@ -62,13 +65,14 @@ enum EngineControl {
         }
         processQueue.async {
             if let script = restartScriptPath() {
-                // The script sleeps and retries; wait on this queue, never on main.
-                finish(runAndWait(script, []))
+                // The script sleeps and retries (~4 s); wait on this queue, never on main. A hung
+                // script is killed so later restarts do not join it forever.
+                finish(runAndWait(script, [], timeout: restartScriptTimeout))
                 return
             }
             // Fallback: stop the daemon, reopen the app bundle (keeps its TCC identity), then
             // suppress the emoji tray.
-            _ = runAndWait("/usr/bin/pkill", ["-x", "voxtype-bin"])
+            _ = runAndWait("/usr/bin/pkill", ["-x", "voxtype-bin"], timeout: 5)
             processQueue.asyncAfter(deadline: .now() + 1.0) {
                 DispatchQueue.main.async {
                     NSWorkspace.shared.openApplication(
@@ -95,53 +99,28 @@ enum EngineControl {
         return nil
     }
 
-    private static func runDetached(_ bin: String, _ args: [String]) {
-        guard FileManager.default.isExecutableFile(atPath: bin) else { return }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
-    }
+    static let restartScriptTimeout: TimeInterval = 30
 
     /// Blocking; process queue only.
-    private static func runAndWait(_ bin: String, _ args: [String]) -> Result<Void, Error> {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
+    private static func runAndWait(_ bin: String, _ args: [String], timeout: TimeInterval) -> Result<Void, Error> {
+        let name = (bin as NSString).lastPathComponent
         do {
-            try task.run()
+            let result = try ProcessRunner.run(bin, args, timeout: timeout, stdout: .discard, stderr: .discard)
+            if result.timedOut { return .failure(Failure(message: "\(name) did not finish within \(Int(timeout)) s")) }
+            return result.status == 0 ? .success(()) : .failure(Failure(message: "\(name) exited with status \(result.status)"))
         } catch {
             return .failure(error)
         }
-        task.waitUntilExit()
-        return task.terminationStatus == 0
-            ? .success(())
-            : .failure(Failure(message: "\((bin as NSString).lastPathComponent) exited with status \(task.terminationStatus)"))
     }
 
     // MARK: - Suppress Voxtype emoji tray
 
     /// Voxtype AppLaunch = daemon child + menubar parent. Kill parent only.
     static func suppressVoxtypeMenubar() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
-        task.arguments = ["-axo", "pid=,args="]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-        } catch {
-            return
-        }
-        // Drain while ps is running: waiting first can deadlock on a full pipe.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        guard let out = String(data: data, encoding: .utf8) else { return }
+        guard let result = try? ProcessRunner.run("/bin/ps", ["-axo", "pid=,args="], timeout: 5, stderr: .discard),
+              result.succeeded
+        else { return }
+        let out = result.stdoutText
 
         for line in out.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)

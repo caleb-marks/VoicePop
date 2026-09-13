@@ -253,12 +253,6 @@ public enum Timing {
         return name
     }()
 
-    /// Free-form diagnostic line (kept for ad-hoc debugging).
-    public static func log(_ msg: @autoclosure () -> String) {
-        guard enabled else { return }
-        event("note", ["msg": msg()])
-    }
-
     /// Structured event. Field values must not contain transcript text.
     public static func event(_ name: String, _ fields: @autoclosure () -> KeyValuePairs<String, String> = [:]) {
         guard enabled else { return }
@@ -297,16 +291,44 @@ public enum Timing {
 
     private static let sinkLock = NSLock()
     private static var sinkFD: Int32 = -2
-    static let rotateBytes: off_t = 32 << 20
+    private static var sinkBytes: off_t = 0
+    static var rotateBytes: off_t = 32 << 20
 
     private static func write(_ line: String) {
         if mirrorToStderr { fputs("[timing] \(line)", stderr) }
+        append(line, to: logURL)
+    }
+
+    /// Appends one line, opening the sink on first use and rotating by a byte counter, since a
+    /// long-running HUD writes every frame while recording (rotating only at open is not enough).
+    static func append(_ line: String, to url: URL) {
         sinkLock.lock()
         defer { sinkLock.unlock() }
-        if sinkFD == -2 { sinkFD = openSink(logURL) }
+        if sinkFD == -2 { openTrackedSink(url) }
         guard sinkFD >= 0 else { return }
         // One write per line: O_APPEND keeps concurrent HUD and voxtype-clean lines whole.
-        _ = line.utf8CString.withUnsafeBufferPointer { Darwin.write(sinkFD, $0.baseAddress, $0.count - 1) }
+        let written = line.utf8CString.withUnsafeBufferPointer { Darwin.write(sinkFD, $0.baseAddress, $0.count - 1) }
+        if written > 0 { sinkBytes += off_t(written) }
+        if sinkBytes > rotateBytes {
+            close(sinkFD)
+            openTrackedSink(url)
+        }
+    }
+
+    /// Lock held. Opens (rotating when already over size) and seeds the counter with the file size.
+    private static func openTrackedSink(_ url: URL) {
+        sinkFD = openSink(url)
+        var st = stat()
+        sinkBytes = sinkFD >= 0 && fstat(sinkFD, &st) == 0 ? st.st_size : 0
+    }
+
+    /// Tests: forget the open sink so the next `append` opens `url` afresh.
+    static func resetSinkForTesting() {
+        sinkLock.lock()
+        if sinkFD >= 0 { close(sinkFD) }
+        sinkFD = -2
+        sinkBytes = 0
+        sinkLock.unlock()
     }
 
     /// Creates the private log (dir 0700, file 0600), rotating once past `rotateBytes`.

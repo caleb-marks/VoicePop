@@ -88,6 +88,26 @@ final class TimingReportTests: XCTestCase {
         XCTAssertTrue(TimingReport.percentile([], 0.5).isNaN)
     }
 
+    func testLongRunningSinkRotatesByByteCount() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voicepop-timing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("timing.log")
+        let savedLimit = Timing.rotateBytes
+        Timing.resetSinkForTesting()
+        Timing.rotateBytes = 500
+        defer {
+            Timing.rotateBytes = savedLimit
+            Timing.resetSinkForTesting()
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let line = String(repeating: "x", count: 99) + "\n"
+        for _ in 0..<12 { Timing.append(line, to: url) } // 1200 bytes through one open sink
+        let size = { (path: String) in ((try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.intValue ?? -1 }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path + ".1"), "rotated without reopening the process")
+        XCTAssertLessThanOrEqual(size(url.path), 600)
+        XCTAssertGreaterThan(size(url.path + ".1"), 500)
+    }
+
     func testSinkIsOwnerOnlyAndRotates() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voicepop-timing-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }

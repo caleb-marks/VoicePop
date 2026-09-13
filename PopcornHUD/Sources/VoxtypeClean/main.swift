@@ -91,6 +91,15 @@ enum VoxtypeCleanMain {
                 out: out,
                 llm: usedLLM
             ))
+            if env["VOICEPOP_NO_SIGNAL"] != "1" {
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    CFNotificationName(rawValue: VoicePopSignal.historyAppended as CFString),
+                    nil,
+                    nil,
+                    true
+                )
+            }
         }
     }
 

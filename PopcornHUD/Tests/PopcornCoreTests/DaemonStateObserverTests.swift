@@ -209,6 +209,39 @@ final class DaemonStateObserverTests: XCTestCase {
         waitFor(r, .recording)
     }
 
+    func testParentDirectoryChurnIsCoalescedWhileRuntimeDirectoryIsMissing() throws {
+        let f = try DaemonFixture(createRuntime: false)
+        let o = makeObserver(f)
+        let r = StateRecorder()
+        r.attach(o)
+        o.start()
+        defer { o.stop() }
+        spin(0.05)
+        let before = o.diagnostics()
+        // Unrelated files churning in the parent (like /tmp) must not reconcile per event.
+        for i in 0..<40 {
+            let path = f.base.appendingPathComponent("noise-\(i)").path
+            FileManager.default.createFile(atPath: path, contents: nil)
+            try FileManager.default.removeItem(atPath: path)
+            usleep(2000)
+        }
+        spin(0.35)
+        let after = o.diagnostics()
+        XCTAssertGreaterThan(after.eventWakeups - before.eventWakeups, 5)
+        XCTAssertLessThanOrEqual(after.reconciles - before.reconciles, 3, "≥250 ms coalescing")
+        XCTAssertGreaterThan(after.coalescedParentEvents, 0)
+        XCTAssertEqual(after.stateReads, before.stateReads)
+        // The daemon's runtime directory is still noticed, within the coalescing window.
+        try FileManager.default.createDirectory(at: f.runtime, withIntermediateDirectories: true)
+        try f.launchDaemon(state: "recording")
+        waitFor(r, .recording)
+        // Once watching the runtime directory itself, events are not delayed.
+        let start = Date()
+        f.writeState("idle")
+        waitFor(r, .idle)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.2)
+    }
+
     func testDaemonExitGoesMissingAndNewDaemonRecovers() throws {
         let f = try DaemonFixture()
         try f.launchDaemon(state: "recording")

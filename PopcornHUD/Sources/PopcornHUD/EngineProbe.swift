@@ -43,38 +43,11 @@ enum EngineProbe {
         return result
     }
 
-    /// Runs a child with stdout captured; nil on launch failure, non-zero exit, or timeout.
+    /// stdout of a read-only voxtype-bin call; nil on launch failure, non-zero exit, or timeout.
     static func run(_ bin: String, _ args: [String], timeout: TimeInterval = 5) -> String? {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        let out = Pipe()
-        task.standardOutput = out
-        task.standardError = FileHandle.nullDevice
-        task.standardInput = FileHandle.nullDevice
-        let exited = DispatchSemaphore(value: 0)
-        task.terminationHandler = { _ in exited.signal() }
-        do {
-            try task.run()
-        } catch {
-            return nil
-        }
-        // Drain while the child runs so a full pipe cannot deadlock it.
-        var data = Data()
-        let drained = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            data = out.fileHandleForReading.readDataToEndOfFile()
-            drained.signal()
-        }
-        if exited.wait(timeout: .now() + timeout) == .timedOut {
-            task.terminate()
-            _ = exited.wait(timeout: .now() + 1)
-            _ = drained.wait(timeout: .now() + 1)
-            Timing.event("probe.timeout", ["cmd": args.first ?? ""])
-            return nil
-        }
-        guard drained.wait(timeout: .now() + 1) == .success, task.terminationStatus == 0 else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let result = try? ProcessRunner.run(bin, args, timeout: timeout, stderr: .discard) else { return nil }
+        if result.timedOut { Timing.event("probe.timeout", ["cmd": args.first ?? ""]) }
+        return result.succeeded ? result.stdoutText : nil
     }
 
     private struct EngineJSON: Decodable {

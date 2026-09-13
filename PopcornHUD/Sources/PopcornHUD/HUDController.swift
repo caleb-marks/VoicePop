@@ -57,10 +57,6 @@ final class HUDController {
     private var oldestUnshownPacketMs: UInt64 = 0
 
     deinit {
-        CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque()
-        )
         observers.forEach { $0.0.removeObserver($0.1) }
         stopAnimation()
         audio.stop()
@@ -113,18 +109,9 @@ final class HUDController {
             if self.reduceMotion { self.scale = 1 }
         }
 
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let ctrl = Unmanaged<HUDController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { ctrl.transcriptReady() }
-            },
-            VoicePopSignal.transcriptReady as CFString,
-            nil,
-            .deliverImmediately
-        )
+        health.addTranscriptReadyListener { [weak self] in
+            self?.transcriptReady()
+        }
 
         buildPanel()
         prewarmSprites()
@@ -248,7 +235,7 @@ final class HUDController {
         attachHost()
         positionPanel()
         panel?.orderFrontRegardless()
-        NSAccessibility.post(element: panel as Any, notification: .announcementRequested, userInfo: [
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
             .announcement: label as NSString,
             .priority: NSAccessibilityPriorityLevel.high.rawValue as NSNumber,
         ])
@@ -281,7 +268,7 @@ final class HUDController {
         collapseProgress = 0
         lastAnimMonoMs = nil
         capsuleFrozen = false
-        NSAccessibility.post(element: panel as Any, notification: .announcementRequested, userInfo: [
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
             .announcement: "Transcribing" as NSString,
             .priority: NSAccessibilityPriorityLevel.high.rawValue as NSNumber,
         ])
