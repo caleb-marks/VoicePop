@@ -93,8 +93,8 @@ final class TimingReportTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("logs/timing.log")
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: url.path, contents: Data(count: Int(Timing.rotateBytes) + 1),
-                                       attributes: [.posixPermissions: 0o644])
+        FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o644])
+        XCTAssertEqual(truncate(url.path, Timing.rotateBytes + 1), 0)
         let fd = Timing.openSink(url)
         XCTAssertGreaterThanOrEqual(fd, 0)
         close(fd)

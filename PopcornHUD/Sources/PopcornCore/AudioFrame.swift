@@ -297,7 +297,7 @@ public enum Timing {
 
     private static let sinkLock = NSLock()
     private static var sinkFD: Int32 = -2
-    static let rotateBytes: off_t = 4 << 20
+    static let rotateBytes: off_t = 32 << 20
 
     private static func write(_ line: String) {
         if mirrorToStderr { fputs("[timing] \(line)", stderr) }
