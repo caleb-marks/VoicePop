@@ -40,13 +40,26 @@ A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, 
 **[Download for Mac — Apple Silicon](https://github.com/caleb-marks/VoicePop/releases/latest/download/VoicePop.dmg)**
 
 
-Apple Silicon, macOS 13+.
+Apple Silicon, macOS 13 or newer (see [Compatibility](#compatibility) for what has actually been tested).
 
 1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) - `.dmg` (drag to Applications). First launch must run from Applications; if you open the DMG copy, VoicePop will move itself there.
 2. Open VoicePop. A setup checklist installs the speech engine, downloads the Parakeet model (~2.4 GB, once) with progress and retry, and guides the permissions Voxtype needs (**Accessibility**, **Input Monitoring**, **Microphone**) and a practice dictation. Reopen it any time from **Settings… → General → Check Setup…**.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
 Signed with a Developer ID certificate and notarized by Apple, so Gatekeeper opens it without an override.
+
+**Upgrading:** open the new DMG and launch the copy inside it; VoicePop stages the new version next to the installed one, verifies it, swaps it in, and relaunches. The version it replaced is kept at `~/Library/Application Support/VoicePop/Previous Versions/` (newest only) so you can drag it back into Applications if an update misbehaves. If the new copy fails to start, the previous version is put back automatically and the message says where the failed copy is.
+
+### Compatibility
+
+| | |
+|---|---|
+| Minimum (deployment target) | macOS 13.0, Apple Silicon |
+| Hands-on tested for this release | macOS 26.6 on an Apple M4 (development machine, single user account) |
+| Built and unit-tested in CI | macOS 14 runner (`swift build` + `swift test`, no app launch) |
+| Not yet verified by hand | macOS 13, 14, and 15: install, permissions flow, FN key, and text insertion on those versions are untested |
+
+Please report what you see on other versions in [Issues](https://github.com/caleb-marks/VoicePop/issues).
 
 ## How it works
 
@@ -88,7 +101,11 @@ Built with AI pair-programming (Claude Code, Codex). Architecture, product decis
 
 The menu bar shows what dictation is doing ("Ready · Hold FN to dictate") and offers a fix when something is wrong, such as restarting the engine. **Fix Last Dictation…** opens the last typed text: edit it, then **Save & Learn** (⌘↩) to teach future dictation, or **Copy Corrected Text**. VoicePop never rewrites text already in another app. **Writing Style** sets the global and per-app style. **Settings… (⌘,)** has General (open at login, FN key help, setup checklist, history), Appearance (mascot with a live preview), Dictation (models with download progress, styles, optional local polish), and Learned Words (search, add, edit, delete).
 
-State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl`, the retained rotation `history.1.jsonl`, `corrections.jsonl`, and `replacements.json`. VoicePop keeps the directory owner-only (`0700`) and those files owner-only (`0600`). Use **Settings… → General → Clear Transcript History…** to remove both history files while keeping saved corrections, learned replacements, and styles. Names you say often can be seeded via `scripts/seed-replacements.py`.
+State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl`, the retained rotation `history.1.jsonl`, `corrections.jsonl`, and `replacements.json`. VoicePop keeps the directory owner-only (`0700`) and those files owner-only (`0600`). Names you say often can be seeded via `scripts/seed-replacements.py`.
+
+**Transcript history is optional.** **Settings… → General → Privacy → Save transcript history** controls whether each dictation is appended to `history.jsonl`. Off stops new entries in both VoicePop and the `voxtype-clean` step that Voxtype runs; it does not delete anything. **Fix Last Dictation…** and **Copy Last Text** only see entries that were saved, so with history off they offer nothing new. **Clear Transcript History…** deletes the two history files and is a separate, confirmed action. Saved corrections (`corrections.jsonl`) and learned words (`replacements.json`) are separate from history and are unaffected by either control.
+
+**Clipboard.** Dictated text is typed into the focused app. If typing fails, for example because Voxtype lacks Accessibility permission, Voxtype's `fallback_to_clipboard` setting (on in the config VoicePop writes) copies the text to the system clipboard instead, replacing whatever was there, without a notice. **Copy Last Text** and **Copy Corrected Text** also place text on the clipboard when you choose them. VoicePop never clears or restores the clipboard. To stop the silent fallback, set `fallback_to_clipboard = false` under `[output]` in `~/.config/voxtype/config.toml`; failed insertions are then dropped instead.
 
 <details>
 <summary><b>Build from source, rollback, instrumentation</b></summary>

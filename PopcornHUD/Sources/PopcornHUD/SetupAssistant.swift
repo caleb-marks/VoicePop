@@ -131,9 +131,11 @@ enum SetupAssistant {
                         }
                     } catch {
                         DispatchQueue.main.async {
+                            // `AppInstaller` messages already say what state Applications was
+                            // left in and what to do next.
                             let alert = NSAlert()
-                            alert.messageText = "Could not move VoicePop to Applications"
-                            alert.informativeText = "\(error.localizedDescription)\n\nDrag VoicePop.app into Applications yourself, then open it again."
+                            alert.messageText = "Could not install VoicePop in Applications"
+                            alert.informativeText = "\(error.localizedDescription)\n\nIf this keeps happening, drag VoicePop.app into Applications yourself, then open it again."
                             alert.runModal()
                             done(false)
                         }
@@ -143,16 +145,48 @@ enum SetupAssistant {
         }
     }
 
-    /// Off the main thread.
+    /// Where the copy an upgrade replaced is kept (newest only), so a bad update is recoverable
+    /// by dragging it back into Applications. Outside /Applications so Launch Services never
+    /// picks it over the installed copy.
+    static var previousVersionsDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/VoicePop/Previous Versions", isDirectory: true)
+    }
+
+    /// Off the main thread. Stage → verify → swap → launch through `AppInstaller`, so the copy
+    /// already in /Applications is never deleted before its replacement is known to be complete,
+    /// and is put back if the new one fails to start (see `AppInstaller` for each failure path).
     private static func moveAndRelaunch(from path: String) throws {
         quitOtherInstances()
-        let fm = FileManager.default
-        if fm.fileExists(atPath: installedApp) { try fm.removeItem(atPath: installedApp) }
-        try fm.copyItem(atPath: path, toPath: installedApp)
-        _ = try run("/usr/bin/open", ["-n", installedApp])
-        guard waitForInstalledInstance(timeout: 5) else {
-            throw Failure(message: "VoicePop did not start from Applications.")
+        let installer = AppInstaller(
+            verify: { try verifyStagedApp(at: $0) },
+            launch: { url in
+                _ = try run("/usr/bin/open", ["-n", url.path])
+                guard waitForInstalledInstance(timeout: 5) else {
+                    throw Failure(message: "no VoicePop process appeared within 5 seconds")
+                }
+            }
+        )
+        let outcome = try installer.install(
+            source: URL(fileURLWithPath: path),
+            destination: URL(fileURLWithPath: installedApp),
+            backupDirectory: previousVersionsDirectory
+        )
+        if let backup = outcome.previousBackup {
+            fputs("VoicePop setup: previous copy kept at \(backup.path)\n", stderr)
         }
+    }
+
+    /// A staged copy must be a complete, correctly signed VoicePop before it replaces anything.
+    private static func verifyStagedApp(at url: URL) throws {
+        let executable = url.appendingPathComponent("Contents/MacOS/VoicePop").path
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            throw Failure(message: "the app bundle is incomplete (its main executable is missing)")
+        }
+        guard let bundle = Bundle(url: url), bundle.bundleIdentifier == PopcornHUDMain.bundleID else {
+            throw Failure(message: "the app bundle is not VoicePop")
+        }
+        _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", url.path])
     }
 
     private static func waitForInstalledInstance(timeout: TimeInterval) -> Bool {

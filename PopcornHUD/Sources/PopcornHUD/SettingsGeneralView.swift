@@ -69,8 +69,42 @@ struct SettingsGeneralView: View {
                 Button("Check Setup…") { SetupAssistant.presentChecklist() }
             }
 
-            // One "Advanced" group instead of two single-button sections; the footer says what
-            // clearing does so the destructive action isn't a bare button.
+            // What VoicePop keeps and where dictated text can end up. The toggle stops *new*
+            // history writes (in this app and in the separate voxtype-clean process, which
+            // re-reads style.json per dictation); deleting what already exists stays a separate,
+            // confirmed action so turning the switch off never silently destroys data.
+            Section {
+                Toggle("Save transcript history", isOn: Binding(
+                    get: { store.prefs.privacy.saveHistory },
+                    set: { store.prefs.privacy.saveHistory = $0; store.save() }
+                ))
+                if let error = store.saveError {
+                    HStack {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        Button("Retry") { store.save() }
+                    }
+                }
+                Text(historyExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Clear Transcript History…", role: .destructive) {
+                    showClearHistoryConfirm = true
+                }
+                if let clearHistoryError {
+                    Text(clearHistoryError).font(.caption).foregroundStyle(.red)
+                }
+                Text(clipboardExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("Saved corrections (corrections.jsonl) and learned words (replacements.json) are separate from transcript history. Neither the switch nor Clear Transcript History touches them; manage learned words in the Learned Words tab.")
+            }
+
             Section {
                 Button("Open Voxtype Configuration File") {
                     let path = NSString(string: "~/.config/voxtype/config.toml").expandingTildeInPath
@@ -84,16 +118,8 @@ struct SettingsGeneralView: View {
                     }
                     NSWorkspace.shared.open(VoicePopPaths.replacements)
                 }
-                Button("Clear Transcript History…", role: .destructive) {
-                    showClearHistoryConfirm = true
-                }
-                if let clearHistoryError {
-                    Text(clearHistoryError).font(.caption).foregroundStyle(.red)
-                }
             } header: {
                 Text("Advanced")
-            } footer: {
-                Text("Clearing history removes the transcript history files. Corrections, learned words, and writing styles are kept.")
             }
         }
         .formStyle(.grouped)
@@ -128,6 +154,19 @@ struct SettingsGeneralView: View {
                 }
             }
         )
+    }
+
+    private var historyExplanation: String {
+        store.prefs.privacy.saveHistory
+            ? "Each dictation is appended to history.jsonl in ~/.config/voicepop (owner-only). Fix Last Dictation and Copy Last Text read the newest entry. Turning this off stops new entries; existing ones stay until you clear them."
+            : "New dictations are not being recorded, in this app or by the voxtype-clean step. Fix Last Dictation and Copy Last Text can only offer dictations saved before this was turned off. Existing entries stay until you clear them."
+    }
+
+    /// Accurate to Voxtype's output chain with VoicePop's config (`fallback_to_clipboard = true`):
+    /// CGEvent typing, then AppleScript typing, then a silent copy to the clipboard. VoicePop
+    /// adds no clipboard protection of its own.
+    private var clipboardExplanation: String {
+        "Clipboard: dictated text is typed into the focused app. If typing fails (for example Voxtype lacks Accessibility permission), Voxtype copies the text to the system clipboard instead, replacing what was there, with no notice. Copy Last Text and Copy Corrected Text also put text on the clipboard when you choose them. VoicePop never clears or restores the clipboard."
     }
 
     private var loginUnavailableReason: String {

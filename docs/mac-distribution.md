@@ -32,4 +32,31 @@ Before publishing, download the actual candidate through a browser on a clean Ma
 
 The current onboarding still needs user approval for Accessibility, Input Monitoring, and Microphone. Signing does not grant those permissions. A normal downloaded-app confirmation may remain. Test on macOS 13 and the latest supported macOS, including a download interruption. Model download progress is already shown in setup.
 
+## Pre-release checklist
+
+Automated (run from the repo; record the output with the release):
+
+- [ ] `swift test --package-path PopcornHUD` passes.
+- [ ] CI (Build and test), CodeQL, Dependabot, and secret-scanning show no open alerts.
+- [ ] `scripts/verify-release-artifacts.sh` passes on the final ZIP and DMG (contents, embedded home paths, signatures).
+- [ ] On the published assets: `shasum -a 256 -c SHA256SUMS`, `codesign --verify --deep --strict`, `spctl --assess --type execute` reports `Notarized Developer ID`, `xcrun stapler validate` on the app, helper, and DMG, and a byte-level `grep -a` for `/Users/` finds only upstream `/Users/runner` paths.
+
+Manual, on a clean Mac or a fresh user account (these cannot be simulated; the unit tests cover the installer's file operations only):
+
+- [ ] Download the DMG in Safari with default Gatekeeper settings; open it and launch the copy inside the DMG. VoicePop offers to move to Applications and relaunches from there.
+- [ ] First-run checklist: engine install, model download with progress, then Accessibility, Input Monitoring, and Microphone prompts name **Voxtype**, and the practice dictation types text.
+- [ ] Interrupt the model download (disconnect the network mid-way). The checklist shows the failure with Retry, and Retry completes the download.
+- [ ] FN (Globe) hold starts recording; release transcribes; text lands in the focused app (Notes, a browser field, a terminal).
+- [ ] Quit and relaunch; log out and back in. The engine and menu bar item come back once.
+- [ ] Upgrade: with the previous release installed and running, open the new DMG and launch it. The new version replaces the old one, the old one appears in `~/Library/Application Support/VoicePop/Previous Versions/`, and permissions still work without re-granting.
+- [ ] Revoke Accessibility for Voxtype and dictate: confirm the text lands on the clipboard (the documented fallback), then re-grant.
+- [ ] Settings → General → Privacy: turn off Save transcript history, dictate, and confirm `history.jsonl` does not grow; Fix Last Dictation explains history is off when nothing was saved.
+- [ ] Repeat the install and dictation steps on macOS 13 (the minimum) or record that this was not done.
+
+Record which items were run, on which macOS version and hardware, in the release notes. Do not report the automated checks as clean-machine validation.
+
+### What was verified for 1.2.1
+
+Automated checks all passed on 2026-09-12 (macOS 26.6, Apple M4): 196 unit tests, CI and CodeQL green with no open alerts, and the published ZIP and DMG matched `SHA256SUMS`, verified with `codesign`, `spctl` (`Notarized Developer ID`), and `stapler`, with no embedded builder paths. None of the manual, clean-machine items above were run for 1.2.1, and macOS 13 through 15 have not been tested by hand.
+
 References: [Apple notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow), [Apple Gatekeeper](https://support.apple.com/en-us/102445), [GitHub release links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases).

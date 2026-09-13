@@ -218,7 +218,7 @@ footer p{margin:0 0 7px}
       <li>Set <b>System Settings → Keyboard → Press 🌐 key to: Do Nothing</b> so Globe does not steal the key.</li>
     </ol>
     <p></p>
-    <div class="note"><b>Not notarized.</b> VoicePop is ad-hoc signed. If macOS says it cannot verify the app, open <b>System Settings → Privacy &amp; Security</b>, scroll down, and click <b>Open Anyway</b> once.</div>
+    <div class="note"><b>Signed and notarized.</b> Releases are signed with a Developer ID certificate and notarized by Apple, so Gatekeeper opens them without an override. Minimum macOS 13 on Apple Silicon; hands-on testing so far has been on macOS 26 only.</div>
   </div>
 </section>
 
@@ -245,7 +245,7 @@ footer p{margin:0 0 7px}
 <section>
   <div class="wrap">
     <h2><span class="n">06</span>What it keeps, and where</h2>
-    <p class="lede">State is plain JSON in <code>~/.config/voicepop/</code> — <code>style.json</code>, <code>history.jsonl</code>, retained rotation <code>history.1.jsonl</code>, <code>corrections.jsonl</code>, and <code>replacements.json</code>. The directory and files are owner-only. Use <b>Settings… → General → Clear Transcript History…</b> to remove both history files while keeping corrections and learned replacements. Details in <a href="https://github.com/caleb-marks/VoicePop/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+    <p class="lede">State is plain JSON in <code>~/.config/voicepop/</code> — <code>style.json</code>, <code>history.jsonl</code>, retained rotation <code>history.1.jsonl</code>, <code>corrections.jsonl</code>, and <code>replacements.json</code>. The directory and files are owner-only. <b>Settings… → General → Privacy → Save transcript history</b> turns transcript recording off without deleting anything; <b>Clear Transcript History…</b> removes both history files while keeping corrections and learned replacements. If typing into an app fails (for example, without Accessibility permission), Voxtype copies the text to the system clipboard instead, silently. Details in <a href="https://github.com/caleb-marks/VoicePop/blob/main/SECURITY.md">SECURITY.md</a>.</p>
   </div>
 </section>
 

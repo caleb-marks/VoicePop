@@ -21,7 +21,17 @@ Plain files in `~/.config/voicepop/`:
 | `replacements.json` | Learned substitutions |
 | `style.json` | Per-app writing style |
 
-VoicePop requests owner-only permissions for this directory (`0700`) and these files (`0600`), including existing files it finds. Use **Settings… → General → Clear Transcript History…** to delete both history files without removing corrections, learned replacements, or styles. You can delete the other files individually to clear their data.
+VoicePop requests owner-only permissions for this directory (`0700`) and these files (`0600`), including existing files it finds.
+
+**Transcript history is optional.** **Settings… → General → Privacy → Save transcript history** (`privacy.saveHistory` in `style.json`, default on) controls whether dictations are appended to `history.jsonl`. When it is off, neither VoicePop nor the separate `voxtype-clean` process (which re-reads `style.json` on every dictation) writes new entries; existing entries are kept until you delete them. **Fix Last Dictation…** and **Copy Last Text** read only the newest saved entry, so with history off they offer nothing new. **Clear Transcript History…** deletes `history.jsonl` and `history.1.jsonl` after confirmation. Corrections and learned words are separate files, are not governed by the history setting, and are not touched by Clear Transcript History; delete them individually to clear their data.
+
+## Clipboard
+
+Voxtype types dictated text into the focused app using CGEvent keystrokes, then AppleScript keystrokes if that fails. Both need Accessibility permission for Voxtype. The config VoicePop writes sets `fallback_to_clipboard = true`, so when both typing methods fail Voxtype copies the text to the system clipboard with `pbcopy`. This replaces the previous clipboard contents and shows no notification (VoicePop turns Voxtype's notifications off). It happens most often when Accessibility permission has not been granted or has been revoked. **Copy Last Text** (menu and Settings) and **Copy Corrected Text** (Fix Last Dictation) also write to the clipboard, only when you choose them. VoicePop does not clear, restore, or expire clipboard contents. To disable the silent fallback, set `fallback_to_clipboard = false` under `[output]` in `~/.config/voxtype/config.toml`; a failed insertion is then dropped.
+
+## Upgrades
+
+When a copy of VoicePop launched from a DMG or Downloads installs itself, it copies the bundle to a hidden staging folder inside `/Applications`, verifies the copy (`codesign --verify --deep --strict`, bundle identifier, main executable) before touching the installed app, moves the installed copy to `~/Library/Application Support/VoicePop/Previous Versions/`, renames the verified copy into place, and launches it. If the swap or launch fails, the previous version is put back and the alert says where the failed copy is. Only the newest previous version is kept.
 
 ## Logs
 

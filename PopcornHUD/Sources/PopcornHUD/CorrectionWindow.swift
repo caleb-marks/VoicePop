@@ -73,6 +73,10 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
+            if !StylePrefsCache.current().privacy.saveHistory {
+                // Say why, or an empty result looks like a bug to someone who just dictated.
+                alert.informativeText = "Transcript history is off (Settings → General → Privacy), so new dictations aren’t recorded and there is nothing for Fix Last Dictation to open. Turn on \u{201c}Save transcript history\u{201d} to use it."
+            }
             alert.alertStyle = .informational
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()

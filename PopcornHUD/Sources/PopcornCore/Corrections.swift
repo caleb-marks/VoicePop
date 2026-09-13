@@ -43,6 +43,22 @@ func appendAll(fd: Int32, data: Data) throws {
 }
 
 public enum HistoryStore {
+    /// The one policy gate for new transcript-history writes. Every producer (today only
+    /// `voxtype-clean`) must go through here rather than `append` directly, so "Save transcript
+    /// history" off means no new `history.jsonl` write from any process. Returns whether an entry
+    /// was appended, so callers can skip the history-appended signal when nothing was written.
+    @discardableResult
+    public static func record(
+        _ e: HistoryEntry,
+        prefs: StylePrefs,
+        to url: URL = VoicePopPaths.history,
+        rotated: URL = VoicePopPaths.historyRotated
+    ) -> Bool {
+        guard prefs.privacy.saveHistory else { return false }
+        append(e, to: url, rotated: rotated)
+        return true
+    }
+
     public static func append(
         _ e: HistoryEntry,
         to url: URL = VoicePopPaths.history,
