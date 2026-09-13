@@ -1,6 +1,72 @@
 import Dispatch
 import Foundation
 
+/// Minimal untyped JSON value, used only to round-trip fields this app does not understand
+/// (forward/backward compatibility with hand-edited or future config files).
+public enum JSONValue: Codable, Equatable, Sendable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([String: JSONValue].self) { self = .object(v) }
+        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+        else { self = .null }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
+
+/// Shared "round-trip unknown JSON fields" plumbing, used by `StylePrefs`, `Replacements`, and
+/// `Replacement` so hand edits or a newer app version's fields survive a save from here instead
+/// of being silently dropped. Previously copied three times with a private `ExtraKey` in each.
+public enum UnknownFieldCapture {
+    struct ExtraKey: CodingKey {
+        var stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    /// Everything in the decoder's top-level object except `knownKeys`.
+    public static func extra(from decoder: Decoder, knownKeys: [String]) -> [String: JSONValue] {
+        guard let raw = try? decoder.singleValueContainer(),
+              let all = try? raw.decode([String: JSONValue].self)
+        else { return [:] }
+        var extra = all
+        for key in knownKeys { extra.removeValue(forKey: key) }
+        return extra
+    }
+
+    /// Encodes `fields` as additional top-level keys alongside whatever the caller already wrote
+    /// through its own `CodingKeys` container.
+    public static func encode(_ fields: [String: JSONValue], to encoder: Encoder) throws {
+        guard !fields.isEmpty else { return }
+        var extra = encoder.container(keyedBy: ExtraKey.self)
+        for (key, value) in fields {
+            guard let codingKey = ExtraKey(stringValue: key) else { continue }
+            try extra.encode(value, forKey: codingKey)
+        }
+    }
+}
+
 public enum Style: String, Codable, CaseIterable, Sendable { case auto, casual, formal }
 
 public enum Mascot: String, Codable, CaseIterable, Sendable { case popcorn, beagle }
@@ -55,12 +121,20 @@ public struct StylePrefs: Codable, Equatable, Sendable {
     public var llm = LLMPrefs()
     public var learning = LearningPrefs()
     public var mascot: Mascot = .popcorn
+    /// Top-level keys this version of the app does not recognize. Round-tripped so hand edits or
+    /// a newer app version's fields survive a save from here instead of being dropped.
+    public var unknownFields: [String: JSONValue] = [:]
     public static let `default` = StylePrefs()
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case version, global, perApp, llm, learning, mascot
+    }
 
     public init() {}
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         if let raw = try c.decodeIfPresent(String.self, forKey: .global) {
             global = Style(rawValue: raw) ?? .auto
@@ -85,6 +159,19 @@ public struct StylePrefs: Codable, Equatable, Sendable {
         }
     }
 
+    /// Custom encode so unknown fields captured at load round-trip back to the file instead of
+    /// being dropped, while known fields stay in their normal shape.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(global.rawValue, forKey: .global)
+        try c.encode(perApp.mapValues(\.rawValue), forKey: .perApp)
+        try c.encode(llm, forKey: .llm)
+        try c.encode(learning, forKey: .learning)
+        try c.encode(mascot.rawValue, forKey: .mascot)
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
+    }
+
     public func resolve(app: String) -> Style {
         if let match = perApp.first(where: { $0.key.caseInsensitiveCompare(app) == .orderedSame }) {
             return match.value
@@ -100,10 +187,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
             return try JSONDecoder().decode(StylePrefs.self, from: data)
         } catch {
             fputs("VoicePop: style.json decode failed, using defaults\n", stderr)
-            let bad = url.appendingPathExtension("bad")
-            try? FileManager.default.removeItem(at: bad)
-            try? FileManager.default.moveItem(at: url, to: bad)
-            try? VoicePopPaths.secureFile(bad)
+            try? VoicePopPaths.quarantine(url)
             return .default
         }
     }
@@ -120,8 +204,14 @@ public struct StylePrefs: Codable, Equatable, Sendable {
 }
 
 public enum VoicePopPaths {
+    /// `VOICEPOP_CONFIG_DIR` overrides the config directory for fixtures and tests (harness use
+    /// only - never point this at live user data). Read fresh each call so tests can flip it
+    /// between cases without process restart.
     public static var dir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let override = ProcessInfo.processInfo.environment["VOICEPOP_CONFIG_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config")
             .appendingPathComponent("voicepop")
     }
@@ -131,8 +221,10 @@ public enum VoicePopPaths {
     public static var corrections: URL { dir.appendingPathComponent("corrections.jsonl") }
     public static var replacements: URL { dir.appendingPathComponent("replacements.json") }
 
+    // Timestamped .bad-<time> quarantine files (see `quarantine`) are secured individually at
+    // quarantine time, not through this fixed list.
     static var privateFiles: [URL] {
-        [style, style.appendingPathExtension("bad"), history, historyRotated, corrections, replacements]
+        [style, history, historyRotated, corrections, replacements]
     }
 
     public static func ensureDir() throws {
@@ -149,6 +241,19 @@ public enum VoicePopPaths {
 
     public static func secureFile(_ url: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Moves a corrupt/malformed file aside instead of overwriting it - the one quarantine
+    /// implementation (L-13; previously `StylePrefs.load`, `CorrectionSaver.quarantine`, and
+    /// `LearnedWordsViewModel.quarantineAndStartFresh` each had their own, with inconsistent error
+    /// handling). The `.bad-<unix time>` suffix means a second corruption never destroys an
+    /// earlier quarantined copy the way a fixed `.bad` name would. Throws (rather than silently
+    /// claiming success) if the move itself fails, e.g. on permissions.
+    public static func quarantine(_ url: URL, now: Date = Date()) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let bad = url.appendingPathExtension("bad-\(Int(now.timeIntervalSince1970))")
+        try FileManager.default.moveItem(at: url, to: bad)
+        try? secureFile(bad)
     }
 }
 

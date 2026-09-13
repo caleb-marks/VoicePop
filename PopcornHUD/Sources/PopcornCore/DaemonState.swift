@@ -54,4 +54,7 @@ public enum VoicePopSignal {
     /// Posted by voxtype-clean immediately before it writes stdout, i.e. the moment
     /// transcription + cleanup is done and before the daemon starts typing.
     public static let transcriptReady = "com.caleb.voicepop.transcript-ready"
+    /// Posted by voxtype-clean after it appended the dictation to history.jsonl, so readers of
+    /// `HistoryStore.last()` see the new entry (transcriptReady fires earlier, for latency).
+    public static let historyAppended = "com.caleb.voicepop.history-appended"
 }

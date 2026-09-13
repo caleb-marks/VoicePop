@@ -102,10 +102,25 @@ public enum Tunables {
     public static let moodReleaseRate: Double = 1.15
 
     public static let enterMs: Double = 120
+    /// Recording → transcribing collapse for the beagle (unchanged).
     public static let collapseMs: Double = 100
+    /// Popcorn collapse: long enough for the tub to visibly sink and fade into the capsule (~6
+    /// frames at 60 Hz), still a snappy dismissal. Reduce Motion shows the capsule immediately.
+    public static let popcornCollapseMs: Double = 160
+
+    public static func collapseMs(for mascot: Mascot) -> Double {
+        mascot == .popcorn ? popcornCollapseMs : collapseMs
+    }
     public static let cleanupFade: Double = 0.120
+    /// Airborne kernels falling outside the mouth start their cleanup fade this far below the
+    /// lip, so strays never reach the status capsule.
+    public static let offsideFadeBelowLip: Double = 24
 
     public static let kernelRadius: Double = 13
+    /// Spawned kernel size range (× `kernelRadius`). Was 0.72...1.08; the smallest kernels read
+    /// as crumbs at native 1× next to the fuller pile.
+    public static let kernelScaleMin: Double = 0.82
+    public static let kernelScaleMax: Double = 1.12
     /// Tighter cascade: 14 ms between accent pops reads as one hit, 20 ms reads as a roll.
     public static let burstSpacing: Double = 0.014
     /// Lower onset gate + faster baseline tracking: more syllables register as onsets, and the
@@ -137,11 +152,40 @@ public enum Tunables {
     /// Shared curved mound, in scene coordinates before bag recoil.
     public static func heapSurface(x: Double) -> Double {
         let u = min(1, abs(x - Double(cardW) / 2) / Double(mouthHalf))
-        // Match visible HeapSeed spill (~34–42 px above lip center).
-        return Double(cardH - bagBottomPad - bagH) - 38 * (1 - u * u * 0.92)
+        // Match the visible HeapSeed crown (~42-46 pt above the lip center).
+        return Double(cardH - bagBottomPad - bagH) - 44 * (1 - u * u * 0.92)
     }
 
     public static let staleAudioMs: Double = 250
+
+    // MARK: Pile motion (see `HeapMotion`)
+
+    /// Onset rise that produces a full-strength heap hop; smaller onsets hop proportionally.
+    public static let heapHopFullRise: Double = 0.3
+    /// Minimum time between heap hops, so only some syllables read as accents.
+    public static let heapHopRefractory: Double = 0.22
+    /// Launch disturbance at the crown (rim-relative y) for a full-energy pop, in pt/s at the
+    /// launch point: downward recoil, outward shove, and rocking spin (rad/s).
+    public static let heapLaunchDepth: Double = -34
+    public static let heapLaunchPush: Double = 6
+    public static let heapLaunchRadial: Double = 14
+    public static let heapLaunchSpin: Double = 1.2
+    public static let heapBurstAccent: Double = 1.6
+    /// Landing disturbance per pt/s of impact velocity, scaled by kernel mass (scale²).
+    public static let heapLandingGain: Double = 0.05
+    /// At most this many landings per step disturb the pile, bounding work under heavy fallout.
+    public static let heapMaxLandingsPerStep = 6
+    /// Resting kernels ride the pile surface on a damped spring (1/s², 1/s) and slide to a stop.
+    public static let restingStiffness: Double = 420
+    public static let restingDamping: Double = 26
+    public static let restingSlideDrag: Double = 5.5
+    public static let restingSpinDrag: Double = 6.5
+    /// Deepest a resting kernel nestles into the pile, in pt. Varied per kernel so resting
+    /// kernels scatter through the mound instead of lining up along one surface curve.
+    public static let restingNestleMax: Double = 7
+    /// Downhill pull on a resting kernel per unit of surface slope (pt/s²): it slips a little
+    /// down the mound before friction stops it.
+    public static let restingSlopePull: Double = 90
 }
 
 public struct HeapPiece: Equatable, Sendable {
@@ -189,7 +233,42 @@ public enum HeapSeed {
         .init(dx: -20, dy: 4, s: 0.90, far: false, shape: 8, rot: 1.35, butter: 0.26),
         .init(dx: 22, dy: -24, s: 0.98, far: true, shape: 2, rot: 0.15, butter: 0.16),
         .init(dx: -8, dy: -24, s: 1.00, far: true, shape: 5, rot: -1.40, butter: 0.18),
+        // Lip fill - tucked behind the front roll so no tub interior shows between kernels
+        .init(dx: -42, dy: 6, s: 0.92, far: false, shape: 7, rot: 0.60, butter: 0.22),
+        .init(dx: -26, dy: 9, s: 0.98, far: false, shape: 9, rot: -0.90, butter: 0.30),
+        .init(dx: -8, dy: 10, s: 1.02, far: false, shape: 2, rot: 0.30, butter: 0.26),
+        .init(dx: 10, dy: 10, s: 1.00, far: false, shape: 5, rot: -0.50, butter: 0.34),
+        .init(dx: 28, dy: 8, s: 0.96, far: false, shape: 10, rot: 1.00, butter: 0.20),
+        .init(dx: 44, dy: 5, s: 0.88, far: false, shape: 8, rot: -1.10, butter: 0.24),
+        // Crown fill - a fuller mound that rises clearly above the rim
+        .init(dx: -32, dy: -18, s: 1.04, far: false, shape: 11, rot: -0.20, butter: 0.28),
+        .init(dx: 34, dy: -18, s: 1.02, far: false, shape: 7, rot: 0.50, butter: 0.32),
+        .init(dx: -4, dy: -30, s: 1.10, far: false, shape: 3, rot: 1.20, butter: 0.30),
+        .init(dx: 6, dy: -42, s: 1.06, far: true, shape: 11, rot: -0.70, butter: 0.22),
+        .init(dx: -22, dy: -34, s: 1.00, far: true, shape: 9, rot: 0.40, butter: 0.20),
+        .init(dx: 26, dy: -32, s: 0.98, far: true, shape: 0, rot: 0.85, butter: 0.26),
+        // Interior fill - the middle of the mouth, front and back
+        .init(dx: -24, dy: -6, s: 0.96, far: true, shape: 4, rot: 0.25, butter: 0.16),
+        .init(dx: 0, dy: -8, s: 1.00, far: true, shape: 6, rot: -0.60, butter: 0.24),
+        .init(dx: 24, dy: -6, s: 0.96, far: true, shape: 1, rot: 1.10, butter: 0.18),
+        .init(dx: -16, dy: 2, s: 0.98, far: false, shape: 11, rot: 0.70, butter: 0.36),
+        .init(dx: 18, dy: 3, s: 0.96, far: false, shape: 3, rot: -0.35, butter: 0.28),
+        .init(dx: 0, dy: -10, s: 1.04, far: false, shape: 10, rot: 0.15, butter: 0.38),
+        // Second pass: close the last lip gaps, which open further now that pieces travel more
+        .init(dx: 1, dy: 12, s: 0.94, far: false, shape: 4, rot: -0.40, butter: 0.30),
+        .init(dx: -34, dy: 10, s: 0.90, far: false, shape: 0, rot: 0.90, butter: 0.18),
+        .init(dx: 36, dy: 10, s: 0.90, far: false, shape: 9, rot: -0.20, butter: 0.26),
+        .init(dx: -50, dy: 1, s: 0.84, far: false, shape: 6, rot: 1.30, butter: 0.22),
+        .init(dx: 50, dy: 0, s: 0.84, far: false, shape: 2, rot: -1.00, butter: 0.32),
     ]
 
     public static let pieces: [HeapPiece] = seeds
+
+    /// Indices of `pieces` in painter's order: rear layer first, then within each layer the
+    /// highest (farthest back on the mound) first, so lower pieces overlap the ones above them.
+    public static let drawOrder: [Int] = seeds.indices.sorted { a, b in
+        if seeds[a].far != seeds[b].far { return seeds[a].far }
+        if seeds[a].dy != seeds[b].dy { return seeds[a].dy < seeds[b].dy }
+        return a < b
+    }
 }

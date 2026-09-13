@@ -21,7 +21,16 @@ Plain files in `~/.config/voicepop/`:
 | `replacements.json` | Learned substitutions |
 | `style.json` | Per-app writing style |
 
-VoicePop requests owner-only permissions for this directory (`0700`) and these files (`0600`), including existing files it finds. Use **More → Clear transcript history…** to delete both history files without removing corrections, learned replacements, or styles. You can delete the other files individually to clear their data.
+VoicePop requests owner-only permissions for this directory (`0700`) and these files (`0600`), including existing files it finds. Use **Settings… → General → Clear Transcript History…** to delete both history files without removing corrections, learned replacements, or styles. You can delete the other files individually to clear their data.
+
+## Logs
+
+VoicePop writes no transcript text to logs.
+
+| File | When |
+|---|---|
+| `~/Library/Logs/VoicePop/timing.log` | Only when timing is turned on (`defaults write com.caleb.voicepop VoicePopTiming -bool true` or `POPCORNHUD_TIMING=1`). Event names and timestamps only; no transcript text, app names, or audio levels. Directory `0700`, file `0600`. |
+| `~/Library/Logs/VoicePop/ollama.log` | Output of an Ollama server that VoicePop started for optional polish (`0600`). Previously `/tmp/voicepop-ollama.log`. |
 
 ## Permissions it asks for
 

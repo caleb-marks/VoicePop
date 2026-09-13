@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import PopcornCore
 
@@ -6,7 +7,9 @@ final class OllamaWarmer {
     private let queue = DispatchQueue(label: "com.caleb.voicepop.ollama", qos: .utility)
     private var lastAttempt: Date?
     static let ollamaBin = "/opt/homebrew/bin/ollama"
-    static let logPath = "/tmp/voicepop-ollama.log"
+    /// Private log (0600) instead of a world-readable, symlink-prone file in /tmp.
+    static let logURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/VoicePop/ollama.log")
 
     /// Call when Formal is (or becomes) the effective style. Never blocks the caller.
     func ensureWarm(_ llm: LLMPrefs) {
@@ -20,11 +23,7 @@ final class OllamaWarmer {
                     fputs("VoicePop: ollama not installed\n", stderr)
                     return
                 }
-                if !FileManager.default.fileExists(atPath: Self.logPath) {
-                    FileManager.default.createFile(atPath: Self.logPath, contents: nil)
-                }
-                let log = FileHandle(forWritingAtPath: Self.logPath)
-                _ = try? log?.seekToEnd()
+                let log = Self.openLog()
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: Self.ollamaBin)
                 process.arguments = ["serve"]
@@ -39,6 +38,15 @@ final class OllamaWarmer {
             }
             if client.isUp() { _ = client.warm() }
         }
+    }
+
+    private static func openLog() -> FileHandle? {
+        let dir = logURL.deletingLastPathComponent().path
+        guard mkdir(dir, 0o700) == 0 || errno == EEXIST else { return nil }
+        let fd = open(logURL.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return nil }
+        _ = fchmod(fd, 0o600)
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     }
 
     static func formalInEffect(_ prefs: StylePrefs) -> Bool {
