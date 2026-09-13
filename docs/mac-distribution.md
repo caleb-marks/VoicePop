@@ -26,7 +26,7 @@ Upload the versioned DMG, ZIP, `VoicePop.dmg`, and `SHA256SUMS` from dist to the
 
 https://github.com/caleb-marks/VoicePop/releases/latest/download/VoicePop.dmg
 
-The README links to the stable latest-release asset as of v1.2.1 (v1.2.0 was the first notarized release). Do not upload intermediate notary ZIPs or claim an old release is notarized.
+The README links to the stable latest-release asset as of v1.2.2 (v1.2.0 was the first notarized release). Do not upload intermediate notary ZIPs or claim an old release is notarized.
 
 Before publishing, download the actual candidate through a browser on a clean Mac/account with normal Gatekeeper settings. Verify DMG opening, installation, first launch, model download, microphone capture, FN detection, text insertion, relaunch, and upgrade from the previous release. Check that the helper remains signed after installation and that permissions refer to Voxtype. Existing incompatible Voxtype installations are preserved and setup explains how to replace them. Existing compatible installations are retained; their signing and permissions can differ from a clean installation.
 

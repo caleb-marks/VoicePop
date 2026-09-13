@@ -91,7 +91,7 @@ The original run - 40 TTS fixtures, CLI transcribe, WER + latency - could only c
 | Whisper `large-v3-turbo` | 0.051 | 1.13 s | 2.2× slower p95 - rejected for a push-to-talk loop |
 | Parakeet `tdt-0.6b-v3` | not measurable | not measurable | not compiled into the upstream macOS build |
 
-Better accuracy was not worth doubling the tail latency on a key you hold down. And that third row - a model that could not be benched at all because the binary did not include it - is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled. Parakeet became the default once it was runnable; the official Whisper-only binary is kept for one-command rollback. Re-benching Parakeet on the same 40 fixtures is still open - see [docs/metrics.md](docs/metrics.md).
+Better accuracy was not worth doubling the tail latency on a key you hold down. And that third row - a model that could not be benched at all because the binary did not include it - is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet` enabled (the unused `parakeet-coreml` feature was dropped in 1.2.2). Parakeet became the default once it was runnable; the official Whisper-only binary is kept for one-command rollback. Re-benching Parakeet on the same 40 fixtures is still open - see [docs/metrics.md](docs/metrics.md).
 
 Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests, opt-in timing instrumentation with a percentile report, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
 
