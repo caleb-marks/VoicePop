@@ -14,9 +14,18 @@ struct PopcornFrame: Equatable {
 struct PopcornView: View {
     var frame: PopcornFrame
 
+    /// Receives the Canvas draw duration in microseconds (timing log, benchmarks). Main thread.
+    static var drawCostHook: ((UInt64) -> Void)?
+
     var body: some View {
         Canvas { ctx, _ in
+            guard let hook = Self.drawCostHook else {
+                PopcornRenderer.drawScene(ctx: &ctx, scene: frame.scene)
+                return
+            }
+            let start = Timing.nowUs()
             PopcornRenderer.drawScene(ctx: &ctx, scene: frame.scene)
+            hook(Timing.nowUs() - start)
         }
         .frame(width: Tunables.cardW, height: Tunables.cardH)
         .scaleEffect(frame.scale, anchor: .bottom)

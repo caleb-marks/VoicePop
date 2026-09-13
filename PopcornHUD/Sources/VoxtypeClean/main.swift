@@ -7,9 +7,15 @@ import PopcornCore
 enum VoxtypeCleanMain {
     static let iso8601 = ISO8601DateFormatter()
 
+    /// Voxtype's post_process timeout is 5 s; leave room for spawn, stdin, and stdout.
+    static let budgetSeconds: TimeInterval = 4.2
+
     static func main() {
+        // Voxtype runs this command the moment recognition hands over raw text.
+        Timing.event("clean.start")
+        let startedUs = Timing.nowUs()
         let started = Date()
-        let deadline = started.addingTimeInterval(4.2)
+        let deadline = started.addingTimeInterval(budgetSeconds)
         let original = FileHandle.standardInput.readDataToEndOfFile()
         let text = String(data: original, encoding: .utf8) ?? String(decoding: original, as: UTF8.self)
         let app = frontmostApp()
@@ -24,34 +30,55 @@ enum VoxtypeCleanMain {
         let rules = TextClean.clean(replaced, app: app, style: style)
         var out = rules
         var usedLLM = false
+        // Timing token only: off | budget | down | used | timeout | unavailable | rejected | …
+        var llmOutcome = "off"
+        var llmUs: UInt64 = 0
         // Even with explicit Formal, never rewrite shell commands.
         if style == .formal, prefs.llm.enabled, env["VOICEPOP_NO_LLM"] != "1", !TextClean.isTerminal(app), !rules.isEmpty {
+            let llmStartUs = Timing.nowUs()
+            llmOutcome = "budget"
             let remaining = Int(deadline.timeIntervalSinceNow * 1000)
             if remaining >= 300 {
                 let client = OllamaClient(prefs: prefs.llm)
                 if client.isUp(timeoutMs: min(300, remaining)) {
                     let budget = Int(deadline.timeIntervalSinceNow * 1000)
-                    if budget >= 1000, let polished = client.polish(
-                        text: rules,
-                        glossary: replacements.glossary(limit: 30),
-                        examples: CorrectionStore.recent(limit: 8),
-                        budgetMs: budget
-                    ) {
-                        out = polished
-                        usedLLM = true
+                    if budget >= 1000 {
+                        let outcome = client.polishDetailed(
+                            text: rules,
+                            glossary: replacements.glossary(limit: 30),
+                            examples: CorrectionStore.recent(limit: 8),
+                            budgetMs: budget
+                        )
+                        llmOutcome = outcome.timingName
+                        if let polished = outcome.text {
+                            out = polished
+                            usedLLM = true
+                        }
                     }
+                } else {
+                    llmOutcome = "down"
                 }
             }
+            llmUs = Timing.nowUs() - llmStartUs
         }
         let payload = out.isEmpty && !original.isEmpty ? original : Data(out.utf8)
+        Timing.event("clean.done", [
+            "llm": llmOutcome,
+            "style": style.rawValue,
+            "llmMs": String(llmUs / 1000),
+            "ms": String((Timing.nowUs() - startedUs) / 1000),
+        ])
         // The HUD's dismiss signal: fires before the daemon types the first character.
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(rawValue: VoicePopSignal.transcriptReady as CFString),
-            nil,
-            nil,
-            true
-        )
+        // VOICEPOP_NO_SIGNAL=1 keeps fixture runs from reaching a live HUD.
+        if env["VOICEPOP_NO_SIGNAL"] != "1" {
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(rawValue: VoicePopSignal.transcriptReady as CFString),
+                nil,
+                nil,
+                true
+            )
+        }
         FileHandle.standardOutput.write(payload)
         try? FileHandle.standardOutput.close()
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
