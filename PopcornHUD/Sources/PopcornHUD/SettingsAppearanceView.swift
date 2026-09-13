@@ -12,7 +12,15 @@ import PopcornCore
 struct SettingsAppearanceView: View {
     @ObservedObject var store: SettingsStore
     @State private var intensity: SyntheticIntensity = .normal
-    @StateObject private var engine = AppearancePreviewEngine()
+    @StateObject private var engine: AppearancePreviewEngine
+
+    /// `fixtureEngine`, when provided (harness-only), is used as-is instead of a fresh engine -
+    /// e.g. one already `preroll`ed a couple of seconds so a snapshot shows motion mid-animation
+    /// instead of frame zero.
+    init(store: SettingsStore, fixtureEngine: AppearancePreviewEngine? = nil) {
+        self.store = store
+        _engine = StateObject(wrappedValue: fixtureEngine ?? AppearancePreviewEngine())
+    }
 
     var body: some View {
         Form {
@@ -41,15 +49,20 @@ struct SettingsAppearanceView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: intensity) { newValue in engine.setIntensity(newValue) }
 
-                TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !engine.running)) { context in
-                    Canvas { ctx, _ in
-                        let scene = engine.advance(to: context.date, mascot: store.prefs.mascot)
-                        PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
+                HStack {
+                    Spacer(minLength: 0)
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !engine.running)) { context in
+                        Canvas { ctx, _ in
+                            let scene = engine.advance(to: context.date, mascot: store.prefs.mascot)
+                            PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
+                        }
+                        .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
+                        .scaleEffect(0.62, anchor: .center)
+                        .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
                     }
-                    .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
-                    .scaleEffect(0.62, anchor: .center)
-                    .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity)
                 .background(WindowAccessor { window in engine.attach(window: window) })
                 // Not just `.accessibilityHidden` - a short textual description survives even
                 // where hiding it entirely would leave VoiceOver with nothing to say about the
@@ -128,6 +141,18 @@ final class AppearancePreviewEngine: ObservableObject {
     deinit {
         if let reduceMotionObserver { NotificationCenter.default.removeObserver(reduceMotionObserver) }
         windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    /// Harness-only: advances the sim/speech pair by synthetic ticks without a live TimelineView,
+    /// so a snapshot can show the preview mid-animation instead of its resting first frame.
+    func preroll(seconds: Double, mascot: Mascot) {
+        let stepMs: UInt64 = 16
+        var mono: UInt64 = 1_000_000
+        let steps = Int((seconds * 1000) / Double(stepMs))
+        for _ in 0..<steps {
+            _ = advance(to: Date(timeIntervalSinceReferenceDate: Double(mono) / 1000), mascot: mascot)
+            mono += stepMs
+        }
     }
 
     func setIntensity(_ intensity: SyntheticIntensity) {

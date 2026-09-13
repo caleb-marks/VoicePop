@@ -34,6 +34,12 @@ final class SetupChecklistModel: ObservableObject {
         servicesRunning = true
     }
 
+    // polish-shared (WS2): harness-only hook so VOICEPOP_UI_SNAPSHOT can render a fixture
+    // checklist state without invoking real probes/installs. Does not change any other behavior.
+    func loadFixtureForSnapshot(_ list: SetupChecklist) {
+        self.list = list
+    }
+
     /// Re-check engine and model without installing anything.
     func probe() {
         guard !working else { return }

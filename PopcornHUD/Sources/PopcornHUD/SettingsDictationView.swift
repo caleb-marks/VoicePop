@@ -7,8 +7,13 @@ import PopcornCore
 /// a fixture-driven runner in tests instead of ever invoking the live engine.
 struct SettingsDictationView: View {
     @ObservedObject var store: SettingsStore
-    @StateObject private var models = ModelListViewModel()
+    @StateObject private var models: ModelListViewModel
     @State private var newAppName = ""
+
+    init(store: SettingsStore, fixtureModels: ModelListViewModel? = nil) {
+        self.store = store
+        _models = StateObject(wrappedValue: fixtureModels ?? ModelListViewModel())
+    }
 
     var body: some View {
         Form {
@@ -80,7 +85,7 @@ struct SettingsDictationView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { models.refresh() }
+        .onAppear { if !models.skipAutoRefresh { models.refresh() } }
     }
 
     @ViewBuilder
@@ -121,6 +126,9 @@ final class ModelListViewModel: ObservableObject {
     @Published var failure: String?
 
     var runner: ModelInstallRunning = LiveModelInstallRunner()
+    /// Harness-only: true when this instance was pre-seeded with fixture state, so `onAppear`
+    /// doesn't immediately overwrite it by probing the live engine.
+    var skipAutoRefresh = false
 
     func refresh() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

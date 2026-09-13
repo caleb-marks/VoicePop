@@ -6,14 +6,22 @@ import PopcornCore
 /// `Replacements.validate` (same rules `apply` uses at runtime), preserves edits and shows an
 /// actionable error with Retry on save failure, and never silently overwrites a malformed file.
 struct SettingsLearnedWordsView: View {
-    @StateObject private var model = LearnedWordsViewModel()
-    @State private var search = ""
+    @StateObject private var model: LearnedWordsViewModel
+    @State private var search: String
     @State private var editingKey: String?
     @State private var editFrom = ""
     @State private var editTo = ""
     @State private var newFrom = ""
     @State private var newTo = ""
     @State private var addError: String?
+    /// Harness-only: skips the disk load so an injected fixture model's state isn't overwritten.
+    private let skipAutoLoad: Bool
+
+    init(fixtureModel: LearnedWordsViewModel? = nil, initialSearch: String = "") {
+        _model = StateObject(wrappedValue: fixtureModel ?? LearnedWordsViewModel())
+        _search = State(initialValue: initialSearch)
+        skipAutoLoad = fixtureModel != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -24,10 +32,13 @@ struct SettingsLearnedWordsView: View {
                 content
             }
         }
+        // Without this, a VStack shorter than the window centers vertically instead of hugging
+        // the top - most visible in the malformed state, which is just a few lines of text.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Reloading from disk is only safe once the in-memory state matches disk - i.e. no
         // pending save failure - otherwise a tab-switch-triggered reload would silently discard
         // edits the user is still trying to save (bug: reload must not race an open failure).
-        .onAppear { if model.saveError == nil { model.load() } }
+        .onAppear { if !skipAutoLoad, model.saveError == nil { model.load() } }
     }
 
     private var malformedState: some View {
@@ -50,6 +61,32 @@ struct SettingsLearnedWordsView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
+            // `.searchable` renders no field at all when hosted in a plain NSHostingController
+            // without a NavigationStack (confirmed by rendering it offscreen in the UI snapshot
+            // harness: the filtering worked, but no search box appeared anywhere) - macOS 13's
+            // searchable requires navigation-view participation this window doesn't have. A
+            // plain field works everywhere.
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search learned words", text: $search)
+                    .textFieldStyle(.plain)
+                if !search.isEmpty {
+                    Button {
+                        search = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
+            .padding([.horizontal, .top], 12)
+            .padding(.bottom, 4)
+
             List {
                 Section {
                     HStack {
@@ -77,7 +114,6 @@ struct SettingsLearnedWordsView: View {
                 .padding(8)
             }
         }
-        .searchable(text: $search, prompt: "Search learned words")
     }
 
     private var filtered: [Replacement] {

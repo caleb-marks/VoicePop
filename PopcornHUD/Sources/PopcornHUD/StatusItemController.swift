@@ -91,6 +91,36 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - State
 
+    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): builds the menu and applies fixture state, without
+    /// any of `start(watcher:health:)`'s live side effects (no engine probing, no warmer, no
+    /// daemon start). Titles/enabled/hidden states can then be logged for inspection - a real
+    /// `NSMenu` attached to a status item can't be screenshotted meaningfully offscreen.
+    func menuForSnapshot(state: DaemonState, status: DictationStatus) -> NSMenu {
+        let menu = buildMenu()
+        for item in menu.items where item.action != nil { item.target = self }
+        lastState = state
+        recordMenuItem?.title = state.isHot ? "Stop Recording" : "Start Recording"
+        cancelMenuItem?.isHidden = !state.isHot
+        cancelMenuItem?.isEnabled = state.isHot
+        lastStatus = status
+        statusMenuItem?.title = status.headline
+        rebuildRecoveryItemsForSnapshot(in: menu, actions: status.actions)
+        return menu
+    }
+
+    /// `rebuildRecoveryItems` looks up `statusItem?.menu`, which is nil in the harness (no real
+    /// status item exists). This variant takes the menu explicitly.
+    private func rebuildRecoveryItemsForSnapshot(in menu: NSMenu, actions: [RecoveryAction]) {
+        guard let separator = recoverySeparator, let sepIndex = menu.items.firstIndex(of: separator) else { return }
+        var insertAt = sepIndex
+        for action in actions {
+            let item = NSMenuItem(title: title(for: action), action: nil, keyEquivalent: "")
+            menu.insertItem(item, at: insertAt)
+            insertAt += 1
+        }
+        separator.isHidden = actions.isEmpty
+    }
+
     private func apply(state: DaemonState) {
         if state.isHot && !lastState.isHot, OllamaWarmer.formalInEffect(prefs) {
             OllamaWarmer.shared.ensureWarm(prefs.llm)
