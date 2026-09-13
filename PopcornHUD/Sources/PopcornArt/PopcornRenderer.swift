@@ -103,6 +103,10 @@ public enum PopcornRenderer {
         }
     }
 
+    /// Below this `bagVisible` the collapsing popcorn tub is fully gone. Lower than the legacy
+    /// 0.15 switch point so the fade covers most of `Tunables.collapseMs` instead of its first third.
+    private static let popcornCollapseFloor = 0.04
+
     public static func drawScene(ctx: inout GraphicsContext, scene: SceneInput) {
         let w = Tunables.cardW
         let h = Tunables.cardH
@@ -115,8 +119,8 @@ public enum PopcornRenderer {
             // the capsule over the few frames `HUDController` drives `bagVisible` from 1 to 0,
             // instead of vanishing on the first transcribing frame.
             if scene.mascot == .popcorn, scene.presentation == .transcribing, !scene.reduceMotion,
-               scene.bagVisible >= 0.15 {
-                let t = CGFloat((scene.bagVisible - 0.15) / 0.85)
+               scene.bagVisible >= popcornCollapseFloor {
+                let t = CGFloat((scene.bagVisible - popcornCollapseFloor) / (1 - popcornCollapseFloor))
                 let anchorY = bagBottom - PopcornMetrics.bottomShift
                 ctx.drawLayer { layer in
                     layer.opacity = Double(t)

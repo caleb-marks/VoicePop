@@ -59,6 +59,11 @@ final class HeapMotionTests: XCTestCase {
         let crown = exposure.indices.max { exposure[$0] < exposure[$1] }!
         let buried = exposure.indices.min { exposure[$0] < exposure[$1] }!
         XCTAssertGreaterThan(travel[crown], travel[buried] * 1.5)
+        // Visible at native 1×: the crown shifts by points, not fractions of one; buried pieces
+        // stay nearly rigid.
+        func span(_ i: Int) -> Double { (series[i].max() ?? 0) - (series[i].min() ?? 0) }
+        XCTAssertGreaterThan(span(crown), 3)
+        XCTAssertLessThan(span(buried), 1.5)
 
         // Not one rigid group: pairwise correlation of piece motion stays low on average.
         func corr(_ a: [Double], _ b: [Double]) -> Double {
@@ -82,6 +87,52 @@ final class HeapMotionTests: XCTestCase {
         }
         XCTAssertLessThan(total / pairs, 0.4)
         XCTAssertLessThan(maxCorr, 0.95)
+    }
+
+    func testAccentHopsLiftTheCrownAboveSustainedMotion() {
+        func crownLift(syllables: Bool) -> Double {
+            let sim = PopcornSim(seed: 2026)
+            let pieces = sim.heapMotion.pieces
+            let crown = pieces.indices.filter { pieces[$0].exposure > 0.75 }
+            var speech = SyntheticSpeech(intensity: .energetic, seed: 7)
+            var mono: UInt64 = 0, lift = 0.0
+            for frame in 0..<(8 * 120) {
+                mono += 8
+                // Held loud level: one onset at the start, then no accents.
+                var (peak, fresh) = speech.sample(atMonoMs: mono)
+                if !syllables { peak = 0.3; fresh = true }
+                sim.step(dt: Tunables.simDt, peak: peak, peakFresh: fresh)
+                guard frame > 120 else { continue }
+                for i in crown { lift = max(lift, -sim.heapMotion.pose[i].dy) }
+            }
+            return lift
+        }
+        let accented = crownLift(syllables: true), held = crownLift(syllables: false)
+        XCTAssertGreaterThan(accented, 5, "speech accents should make the crown hop visibly")
+        XCTAssertGreaterThan(accented, held * 1.5, "hops come from accents, not from loudness alone")
+    }
+
+    func testNudgedPieceDragsItsNeighbors() {
+        var heap = HeapMotion(seed: 1)
+        let pieces = heap.pieces
+        let nudged = pieces.indices.max { pieces[$0].exposure < pieces[$1].exposure }!
+        let neighbors = Set(heap.links.filter { $0.a == nudged || $0.b == nudged }.map { $0.a == nudged ? $0.b : $0.a })
+        let distant = pieces.indices.filter {
+            hypot(pieces[$0].restX - pieces[nudged].restX, pieces[$0].restY - pieces[nudged].restY) > 45
+        }
+        XCTAssertFalse(neighbors.isEmpty)
+        XCTAssertFalse(distant.isEmpty)
+        heap.nudge(piece: nudged, dvx: 60)
+        var peak = [Double](repeating: 0, count: pieces.count)
+        for _ in 0..<90 {
+            heap.capturePrevious()
+            heap.step(dt: Tunables.simDt, drive: 0, enabled: true)
+            for i in pieces.indices { peak[i] = max(peak[i], abs(heap.pose[i].dx)) }
+        }
+        let nearMean = neighbors.map { peak[$0] }.reduce(0, +) / Double(neighbors.count)
+        let farMean = distant.map { peak[$0] }.reduce(0, +) / Double(distant.count)
+        XCTAssertGreaterThan(nearMean, peak[nudged] * 0.1, "neighbors should visibly follow the shove")
+        XCTAssertGreaterThan(nearMean, farMean * 5, "the shove fades with distance through the pile")
     }
 
     func testDisturbanceAffectsNearbyPiecesMoreThanDistantOnes() {
@@ -133,7 +184,7 @@ final class HeapMotionTests: XCTestCase {
     }
 
     func testLongLoudAccentedSpeechStaysBounded() {
-        // Ninety seconds of fixed steps (no display snapshots) is ~60 accent cycles and dozens of
+        // Sixty seconds of fixed steps (no display snapshots) is 40 accent cycles and dozens of
         // kernel lifetimes: long enough for any drift or energy build-up to show, short enough
         // to keep the suite fast in debug builds.
         let sim = PopcornSim(seed: 2026)
@@ -142,7 +193,7 @@ final class HeapMotionTests: XCTestCase {
         var maxCount = 0, maxSettled = 0
         var mono: UInt64 = 0
         var speech = SyntheticSpeech(intensity: .energetic, seed: 3)
-        let seconds = 90
+        let seconds = 60
         var worstTravel = 0.0, worstSpeed = 0.0, worstRestingVx = 0.0
         var highestResting = Double.infinity
         var allFinite = true

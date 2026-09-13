@@ -9,6 +9,8 @@ import SwiftUI
 /// - `motion-full.mp4` / `motion-full.gif`: the whole card at 2× through speech, a pause, speech
 ///   again, and the recording → transcribing collapse.
 /// - `motion-heap.mp4`: the same run cropped to the pile at 4×.
+/// - `motion-pile-1x.gif` / `motion-pile-1x-enlarged3x.gif`: the pile at native 1× (set
+///   `POPCORN_KEEP_FRAMES=1` to keep the PNG frames in `_pile1x/`).
 /// - `sheet-*.png`: contact sheets of every 2nd frame over about one second, cropped to the pile,
 ///   for loud speech, accents, the pause ease-down, the collapse, and Reduce Motion.
 /// - `heap-trace.csv`: per-frame displacement of every heap piece, plus heat and population.
@@ -35,6 +37,8 @@ enum MotionCapture {
     /// Crop around the pile in scene points.
     static let heapCrop = CGRect(x: 50, y: 118, width: 160, height: 110)
     static let pileCrop = CGRect(x: 58, y: 118, width: 144, height: 108)
+    /// Native-1× clip: the tub mouth, pile, and the airspace just above it.
+    static let nativeCrop = CGRect(x: 40, y: 90, width: 180, height: 170)
 
     static func run(outDir: String) {
         try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
@@ -121,7 +125,8 @@ enum MotionCapture {
 
         let framesDir = "\(outDir)/_frames"
         let heapDir = "\(outDir)/_heap"
-        for dir in [framesDir, heapDir] {
+        let pileDir = "\(outDir)/_pile1x"
+        for dir in [framesDir, heapDir, pileDir] {
             try? FileManager.default.removeItem(atPath: dir)
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         }
@@ -129,6 +134,9 @@ enum MotionCapture {
             PopcornCapture.save(PopcornCapture.render(s.scene, bg: .gray, scale: 2, hudScale: s.hudScale), to: String(format: "%@/f_%04d.png", framesDir, i))
             if let img = renderCrop(s.scene, crop: heapCrop, scale: 4) {
                 PopcornCapture.save(img, to: String(format: "%@/f_%04d.png", heapDir, i))
+            }
+            if let img = renderCrop(s.scene, crop: nativeCrop, scale: 1, hudScale: s.hudScale) {
+                PopcornCapture.save(img, to: String(format: "%@/f_%04d.png", pileDir, i))
             }
         }
         PopcornCapture.ffmpeg(["-y", "-framerate", "60", "-i", "\(framesDir)/f_%04d.png",
@@ -138,7 +146,16 @@ enum MotionCapture {
         PopcornCapture.ffmpeg(["-y", "-framerate", "60", "-i", "\(framesDir)/f_%04d.png",
                                "-vf", "fps=30,scale=260:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=200:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4",
                                "\(outDir)/motion-full.gif"])
-        for dir in [framesDir, heapDir] { try? FileManager.default.removeItem(atPath: dir) }
+        // Native 1×: what the HUD shows on a 1× display, and the same pixels enlarged 3× (nearest
+        // neighbor) so the motion can be judged without resampling blur.
+        PopcornCapture.ffmpeg(["-y", "-framerate", "60", "-i", "\(pileDir)/f_%04d.png",
+                               "-vf", "fps=30,split[s0][s1];[s0]palettegen=max_colors=200:stats_mode=diff[p];[s1][p]paletteuse=dither=none",
+                               "\(outDir)/motion-pile-1x.gif"])
+        PopcornCapture.ffmpeg(["-y", "-framerate", "60", "-i", "\(pileDir)/f_%04d.png",
+                               "-vf", "fps=30,scale=iw*3:ih*3:flags=neighbor,split[s0][s1];[s0]palettegen=max_colors=200:stats_mode=diff[p];[s1][p]paletteuse=dither=none",
+                               "\(outDir)/motion-pile-1x-enlarged3x.gif"])
+        let keepFrames = ProcessInfo.processInfo.environment["POPCORN_KEEP_FRAMES"] != nil
+        for dir in [framesDir, heapDir] + (keepFrames ? [] : [pileDir]) { try? FileManager.default.removeItem(atPath: dir) }
         print("wrote motion captures to \(outDir) (\(scenes.count) frames)")
     }
 
@@ -167,10 +184,15 @@ enum MotionCapture {
         if let img = renderer.nsImage { PopcornCapture.save(img, to: path) }
     }
 
-    static func renderCrop(_ scene: PopcornRenderer.SceneInput, crop: CGRect, scale: CGFloat) -> NSImage? {
+    static func renderCrop(_ scene: PopcornRenderer.SceneInput, crop: CGRect, scale: CGFloat, hudScale: Double = 1) -> NSImage? {
         let view = Canvas { ctx, size in
             drawBackdrop(&ctx, size: size, bg: .gray)
             ctx.translateBy(x: -crop.minX, y: -crop.minY)
+            if hudScale != 1 {
+                ctx.translateBy(x: Tunables.cardW / 2, y: Tunables.cardH)
+                ctx.scaleBy(x: hudScale, y: hudScale)
+                ctx.translateBy(x: -Tunables.cardW / 2, y: -Tunables.cardH)
+            }
             PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
         }
         .frame(width: crop.width, height: crop.height)

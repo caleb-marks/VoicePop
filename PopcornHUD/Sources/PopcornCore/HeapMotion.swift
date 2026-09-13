@@ -56,12 +56,15 @@ struct HeapMotion {
         var strength: Double      // 1/s²
     }
 
-    static let maxSpeed = 80.0          // pt/s
+    static let maxSpeed = 260.0          // pt/s
     static let maxSpin = 4.0            // rad/s
     static let impulseRadius = 16.0     // pt, Gaussian sigma of a disturbance
     static let energyAttack = 14.0      // 1/s
     static let energyRelease = 2.6      // 1/s: ~0.4 s to fall by 2/3 in a pause
-    static let hopSpeed = 75.0          // pt/s upward for a fully exposed piece
+    static let hopSpeed = 220.0
+    /// Agitation target as a share of each piece's travel per unit of noise (±1σ).
+    static let agitation = 0.6
+    static let lateralCoupling = 3.5          // pt/s upward for a fully exposed piece
     static let sleepEpsilon = 0.004
 
     private(set) var pieces: [Piece]
@@ -110,16 +113,16 @@ struct HeapMotion {
         // Pieces wedged against the rim shoulders are held by the paper, too.
         exposure *= 1 - 0.35 * max(0, min(1, (abs(Double(p.dx)) - 30) / 14))
         if p.far { exposure *= 0.9 }
-        let k = lerp(1100, 300, exposure) * (0.8 + 0.4 * jitter(i, 1))
-        let zeta = lerp(0.60, 0.30, exposure) * (0.85 + 0.3 * jitter(i, 2))
+        let k = lerp(1100, 220, exposure) * (0.8 + 0.4 * jitter(i, 1))
+        let zeta = lerp(0.60, 0.34, exposure) * (0.85 + 0.3 * jitter(i, 2))
         let kr = k * (1.1 + 0.5 * jitter(i, 3))
         let zetaR = lerp(0.55, 0.28, exposure) * (0.85 + 0.3 * jitter(i, 4))
         return Piece(
             restX: Double(p.dx), restY: Double(p.dy), exposure: exposure,
             stiffness: k, damping: 2 * zeta * sqrt(k),
             rotStiffness: kr, rotDamping: 2 * zetaR * sqrt(kr),
-            maxX: lerp(0.5, 2.4, exposure), maxUp: lerp(0.35, 3.2, exposure),
-            maxDown: lerp(0.25, 0.9, exposure), maxRot: lerp(0.03, 0.16, exposure),
+            maxX: lerp(0.3, 5.0, exposure), maxUp: lerp(0.3, 9.0, exposure),
+            maxDown: lerp(0.2, 1.5, exposure), maxRot: lerp(0.02, 0.25, exposure),
             mobility: lerp(0.45, 1.0, exposure),
             noiseTau: 0.10 + 0.20 * jitter(i, 5)
         )
@@ -131,7 +134,7 @@ struct HeapMotion {
         for a in pieces.indices {
             for b in (a + 1)..<pieces.count {
                 let d = hypot(pieces[a].restX - pieces[b].restX, pieces[a].restY - pieces[b].restY)
-                if d < reach { out.append(Link(a: a, b: b, strength: 160 * (1 - d / reach))) }
+                if d < reach { out.append(Link(a: a, b: b, strength: 110 * (1 - d / reach))) }
             }
         }
         return out
@@ -174,13 +177,13 @@ struct HeapMotion {
             } else {
                 noise[i] = .rest
             }
-            let tx = noise[i].dx * p.maxX * 0.45 * energy
-            let ty = noise[i].dy * (noise[i].dy < 0 ? p.maxUp : p.maxDown) * 0.45 * energy
-            let tr = noise[i].rot * p.maxRot * 0.45 * energy
+            let tx = noise[i].dx * p.maxX * Self.agitation * energy
+            let ty = noise[i].dy * (noise[i].dy < 0 ? p.maxUp * 0.35 : p.maxDown) * Self.agitation * energy
+            let tr = noise[i].rot * p.maxRot * Self.agitation * energy
             accel[i].dx = p.stiffness * (tx - pose[i].dx) - p.damping * velocity[i].dx
             accel[i].dy = p.stiffness * (ty - pose[i].dy) - p.damping * velocity[i].dy
             accel[i].rot = p.rotStiffness * (tr - pose[i].rot) - p.rotDamping * velocity[i].rot
-            // Soft travel limits: the pile packs tighter past 70% of a piece's range, so pieces
+            // Soft travel limits: the pile packs tighter past 80% of a piece's range, so pieces
             // decelerate into their limits instead of hitting the hard stop below.
             accel[i].dx -= Self.limitForce(pose[i].dx, p.maxX, p.maxX, p.stiffness)
             accel[i].dy -= Self.limitForce(pose[i].dy, p.maxUp, p.maxDown, p.stiffness)
@@ -189,9 +192,12 @@ struct HeapMotion {
         for link in links {
             let ddx = pose[link.b].dx - pose[link.a].dx
             let ddy = pose[link.b].dy - pose[link.a].dy
-            accel[link.a].dx += link.strength * ddx
+            // Sideways shoves carry through the packed pile more than lifts do, so a nudged piece
+            // visibly drags its neighbors while crown pieces can still hop on their own.
+            let sx = link.strength * Self.lateralCoupling
+            accel[link.a].dx += sx * ddx
             accel[link.a].dy += link.strength * ddy
-            accel[link.b].dx -= link.strength * ddx
+            accel[link.b].dx -= sx * ddx
             accel[link.b].dy -= link.strength * ddy
         }
 
@@ -255,13 +261,20 @@ struct HeapMotion {
         if touched { asleep = false }
     }
 
+    /// Push a single piece sideways (tests and diagnostics): unlike `disturb`, nothing else is hit
+    /// directly, so any motion of other pieces comes through the coupling.
+    mutating func nudge(piece i: Int, dvx: Double) {
+        velocity[i].dx = clamp(velocity[i].dx + dvx, Self.maxSpeed)
+        asleep = false
+    }
+
     /// Speech-onset hop: exposed pieces jump by different amounts in slightly different directions.
     mutating func hop(strength: Double) {
         let s = max(0, min(1, strength.isFinite ? strength : 0))
         guard s > 0 else { return }
         for i in pieces.indices {
             let e = pieces[i].exposure
-            let lift = Self.hopSpeed * s * e * e * rng.next(in: 0.45...1.0)
+            let lift = Self.hopSpeed * s * e * rng.next(in: 0.6...1.0)
             velocity[i].dy = clamp(velocity[i].dy - lift, Self.maxSpeed)
             velocity[i].dx = clamp(velocity[i].dx + lift * 0.35 * rng.next(in: -1...1), Self.maxSpeed)
             velocity[i].rot = clamp(velocity[i].rot + s * e * 2.2 * rng.next(in: -1...1), Self.maxSpin)
@@ -312,7 +325,7 @@ struct HeapMotion {
     }
 
     private static func limitForce(_ o: Double, _ negLimit: Double, _ posLimit: Double, _ k: Double) -> Double {
-        let soft = 0.7
+        let soft = 0.8
         if o > posLimit * soft { return 6 * k * (o - posLimit * soft) }
         if o < -negLimit * soft { return 6 * k * (o + negLimit * soft) }
         return 0
