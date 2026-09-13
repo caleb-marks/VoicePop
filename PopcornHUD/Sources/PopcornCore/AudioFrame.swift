@@ -121,6 +121,8 @@ public struct AudioLevelSample: Equatable, Sendable {
     public var peak: Float
     public var freshness: AudioLevelFreshness
     public var snapshot: AudioSnapshot
+    /// For `.fresh` samples: arrival time of the oldest packet folded into this sample.
+    public var oldestPacketMonoMs: UInt64 = 0
 
     public init(peak: Float, freshness: AudioLevelFreshness, snapshot: AudioSnapshot) {
         self.peak = peak
@@ -135,6 +137,8 @@ public struct AudioLevelHold: Equatable, Sendable {
     public var peakSinceConsume: Float = 0
     public var hadFramesSinceConsume = false
     public var lastFrameMono: UInt64 = 0
+    /// Arrival time of the oldest packet not yet consumed (0 when none); measures reaction latency.
+    public var firstFrameMonoSinceConsume: UInt64 = 0
     public var snapshot = AudioSnapshot.empty
 
     public init() {}
@@ -143,6 +147,7 @@ public struct AudioLevelHold: Equatable, Sendable {
         let p = peak.isFinite ? max(0, min(1, peak)) : 0
         peakSinceConsume = max(peakSinceConsume, p)
         lastFreshPeak = p
+        if !hadFramesSinceConsume { firstFrameMonoSinceConsume = monoMs }
         hadFramesSinceConsume = true
         lastFrameMono = monoMs
         snapshot = AudioSnapshot(
@@ -161,6 +166,7 @@ public struct AudioLevelHold: Equatable, Sendable {
         lastFreshPeak = 0
         peakSinceConsume = 0
         hadFramesSinceConsume = false
+        firstFrameMonoSinceConsume = 0
     }
 
     public mutating func reset() {
@@ -169,6 +175,7 @@ public struct AudioLevelHold: Equatable, Sendable {
         peakSinceConsume = 0
         hadFramesSinceConsume = false
         lastFrameMono = 0
+        firstFrameMonoSinceConsume = 0
     }
 
     /// Apply stale gate, then return the sample for this display tick.
@@ -181,15 +188,19 @@ public struct AudioLevelHold: Equatable, Sendable {
         if !snapshot.connected || !snapshot.levelsAvailable || snapshot.stale {
             peakSinceConsume = 0
             hadFramesSinceConsume = false
+            firstFrameMonoSinceConsume = 0
             lastFreshPeak = 0
             return AudioLevelSample(peak: 0, freshness: .unavailable, snapshot: snapshot)
         }
 
         if hadFramesSinceConsume {
             let peak = peakSinceConsume
+            var sample = AudioLevelSample(peak: peak, freshness: .fresh, snapshot: snapshot)
+            sample.oldestPacketMonoMs = firstFrameMonoSinceConsume
             peakSinceConsume = 0
             hadFramesSinceConsume = false
-            return AudioLevelSample(peak: peak, freshness: .fresh, snapshot: snapshot)
+            firstFrameMonoSinceConsume = 0
+            return sample
         }
 
         // No new packet: hold last fresh level (including 0 from a silent packet).
