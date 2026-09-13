@@ -134,6 +134,8 @@ final class ModelListViewModel: ObservableObject {
     @Published var downloadMessage = ""
     @Published var failure: String?
 
+    // Resolve lazily: Settings can be built before the health monitor is attached.
+    var healthProvider: () -> DictationHealthMonitor? = { SettingsWindowController.shared.health }
     var runner: ModelInstallRunning = LiveModelInstallRunner()
     /// Harness-only: true when this instance was pre-seeded with fixture state, so `onAppear`
     /// doesn't immediately overwrite it by probing the live engine.
@@ -171,8 +173,9 @@ final class ModelListViewModel: ObservableObject {
         lastAttempted = catalogID
         failure = nil
         let needsDownload = !installed.contains { VoxtypeModel.matches($0, catalogID: catalogID) }
+        downloadingID = catalogID
         if needsDownload {
-            downloadingID = id
+            healthProvider()?.noteModelDownload(.init(model: id, fraction: nil))
             downloadFraction = nil
             downloadMessage = "Downloading…"
             health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: nil))
@@ -186,6 +189,7 @@ final class ModelListViewModel: ObservableObject {
                             guard let self else { return }
                             switch event {
                             case .progress(let fraction, let bytesGB, let totalGB):
+                                self.healthProvider()?.noteModelDownload(.init(model: id, fraction: fraction))
                                 self.downloadFraction = fraction
                                 self.downloadMessage = String(format: "Downloading… %.1f of %.1f GB", bytesGB, totalGB)
                                 self.health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: fraction))
@@ -198,6 +202,7 @@ final class ModelListViewModel: ObservableObject {
                 try runner.setModel(id)
                 guard let self else { return }
                 DispatchQueue.main.async { [self] in
+                    self.healthProvider()?.noteModelDownload(nil)
                     self.downloadingID = nil
                     self.installed.insert(id)
                     self.current = id
@@ -208,6 +213,7 @@ final class ModelListViewModel: ObservableObject {
             } catch {
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    self.healthProvider()?.noteModelDownload(nil)
                     self.downloadingID = nil
                     self.failure = error.localizedDescription
                     // Failed: also clear it, rather than leaving the menu showing a download
