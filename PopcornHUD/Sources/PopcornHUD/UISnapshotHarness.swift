@@ -24,6 +24,7 @@ enum UISnapshotHarness {
         renderCorrectionWindow(to: outDir, log: &log)
         renderSetupChecklist(to: outDir, log: &log)
         logMenuStates(to: outDir, log: &log)
+        verifyEditorRecovery(log: &log)
         logKeyboardNavigation(to: outDir, log: &log)
 
         let logURL = outDir.appendingPathComponent("harness-log.txt")
@@ -64,6 +65,36 @@ enum UISnapshotHarness {
             replacements.entries.append(Replacement(from: pair.0, to: pair.1, count: i + 1, lastTs: now))
         }
         try? replacements.save()
+    }
+
+    private static func verifyEditorRecovery(log: inout [String]) {
+        let editor = CorrectionWindowController.shared
+        func textViews(_ view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+        }
+        guard let content = editor.window?.contentView,
+              let text = textViews(content).first else { fatalError("Missing correction editor") }
+        let edited = text.string
+        editor.present()
+        precondition(text.string == edited, "Reopening correction discarded edits")
+        log.append("PASS: reopening correction preserves the edited text")
+
+        let model = LearnedWordsViewModel()
+        model.load()
+        guard let old = model.entries.first else { fatalError("Missing learned-word fixture") }
+        var updated = Replacements.load()
+        updated.entries.append(Replacement(from: "concurrentword", to: "ConcurrentWord", count: 1, lastTs: "fixture"))
+        try! updated.save()
+        model.delete(old)
+        precondition(Replacements.load().entries.contains { $0.from == "concurrentword" }, "Lost concurrent learned word")
+        let valid = try! Data(contentsOf: VoicePopPaths.replacements)
+        let malformed = Data("{broken".utf8)
+        try! malformed.write(to: VoicePopPaths.replacements)
+        _ = model.add(from: "secondword", to: "corrected phrase")
+        precondition(model.saveError != nil)
+        precondition(try! Data(contentsOf: VoicePopPaths.replacements) == malformed, "Overwrote malformed file")
+        try! valid.write(to: VoicePopPaths.replacements)
+        log.append("PASS: learned-word edits preserve concurrent additions and reject newly malformed data")
     }
 
     // MARK: - Rendering

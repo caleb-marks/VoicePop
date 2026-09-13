@@ -48,6 +48,13 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     /// `history.jsonl`), and this is a deliberate, infrequent user action where the extra disk
     /// read is cheap and correctness matters more than avoiding it.
     func present() {
+        // Reopening an existing editor must preserve edits, errors, and retry identity.
+        if let window, window.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            return
+        }
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {
             returnTo = front
@@ -67,6 +74,12 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     }
 
     private func presentResolved(_ entry: HistoryEntry?) {
+        // Two rapid menu requests can complete asynchronously in either order.
+        if let window, window.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
         guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
