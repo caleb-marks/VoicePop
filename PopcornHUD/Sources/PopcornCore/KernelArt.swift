@@ -28,6 +28,27 @@ public enum KernelArt {
         creasePaths[normalized(shape)]
     }
 
+    /// Quadratic fold curves in unit space (squash applied), for renderers that shape their own
+    /// crease strokes instead of stroking `creases(shape:)` end to end.
+    public struct Fold: Equatable, Sendable {
+        public var start: CGPoint
+        public var control: CGPoint
+        public var end: CGPoint
+
+        /// Point at parameter `t` in 0...1 along the quadratic curve.
+        public func point(at t: Double) -> CGPoint {
+            let u = 1 - t
+            return CGPoint(
+                x: u * u * start.x + 2 * u * t * control.x + t * t * end.x,
+                y: u * u * start.y + 2 * u * t * control.y + t * t * end.y
+            )
+        }
+    }
+
+    public static func folds(shape: Int) -> [Fold] {
+        foldLists[normalized(shape)]
+    }
+
     public static func toast(shape: Int) -> CGPath {
         toastPaths[normalized(shape)]
     }
@@ -51,6 +72,16 @@ public enum KernelArt {
     private static let toastPaths: [CGPath] = (0..<templateCount).map { toastPath(for: $0) }
     private static let hullPaths: [CGPath] = (0..<templateCount).map { hullPath(for: $0) }
     private static let lobeLists: [[Lobe]] = (0..<templateCount).map { lobeList(for: $0) }
+    private static let foldLists: [[Fold]] = (0..<templateCount).map { shape in
+        let recipe = recipes[shape]
+        return recipe.creases.map {
+            Fold(
+                start: CGPoint(x: $0.x0, y: $0.y0 * recipe.squashY),
+                control: CGPoint(x: $0.cx, y: $0.cy * recipe.squashY),
+                end: CGPoint(x: $0.x1, y: $0.y1 * recipe.squashY)
+            )
+        }
+    }
 
     /// Irregular blob centers - deliberately uneven spacing (not flower/star symmetry).
     private struct Blob {
