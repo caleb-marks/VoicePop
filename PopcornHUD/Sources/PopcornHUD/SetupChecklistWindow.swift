@@ -17,6 +17,8 @@ final class SetupChecklistModel: ObservableObject {
     /// Main thread only.
     private var engineOrModelChanged = false
     private var lastTranscriptAt: Date?
+    /// Set once services start; downloads and installs report here so the menu stays truthful.
+    weak var health: DictationHealthMonitor?
 
     init(store: SetupEvidenceStore = SetupEvidenceStore()) {
         self.store = store
@@ -92,18 +94,24 @@ final class SetupChecklistModel: ObservableObject {
                 if !SetupAssistant.modelInstalled() {
                     DispatchQueue.main.async { self.engineOrModelChanged = true }
                     try SetupAssistant.downloadModel { message, fraction in
-                        DispatchQueue.main.async { self.list.model = .working(message: message, fraction: fraction) }
+                        DispatchQueue.main.async {
+                            self.list.model = .working(message: message, fraction: fraction)
+                            self.health?.noteModelDownload(.init(model: SetupAssistant.modelName, fraction: fraction))
+                        }
                     }
                 }
                 DispatchQueue.main.async {
                     self.working = false
                     self.list.model = .done("The Parakeet speech model is on this Mac.")
+                    self.health?.noteModelDownload(nil)
+                    self.health?.refresh()
                     self.announceProgress()
                     self.startServicesIfReady()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.working = false
+                    self.health?.noteModelDownload(nil)
                     self.list.model = .failed(error.localizedDescription)
                     self.announce("Speech model download failed")
                 }
@@ -181,15 +189,25 @@ final class SetupChecklistWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private weak var health: DictationHealthMonitor?
     private var listening = false
+    private var lastMenuRecordRequest: Date?
 
     /// Called once services exist, so daemon state can count as FN/permission evidence.
     func attach(health: DictationHealthMonitor) {
         self.health = health
+        model.health = health
         model.servicesStarted()
         guard !listening else { return }
         listening = true
         health.addListener { [weak self] status in
-            self?.model.observe(daemon: status.daemon)
+            guard let self else { return }
+            // A recording started from the menu proves nothing about the FN key.
+            if status.daemon.isHot, let menu = self.lastMenuRecordRequest, Date().timeIntervalSince(menu) < 3 {
+                return
+            }
+            self.model.observe(daemon: status.daemon)
+        }
+        NotificationCenter.default.addObserver(forName: .voicePopRecordRequested, object: nil, queue: .main) { [weak self] _ in
+            self?.lastMenuRecordRequest = Date()
         }
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
