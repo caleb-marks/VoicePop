@@ -197,9 +197,27 @@ public struct AudioLevelHold: Equatable, Sendable {
     }
 }
 
+/// Opt-in pipeline timing. Never logs transcript text, app names, or audio levels.
+///
+/// Enable with `POPCORNHUD_TIMING=1` (also mirrors to stderr) or, for an app launched by
+/// Launch Services, `defaults write com.caleb.voicepop VoicePopTiming -bool true` (voxtype-clean
+/// reads the same key). Lines go to `~/Library/Logs/VoicePop/timing.log` (directory 0700, file
+/// 0600; `VOICEPOP_TIMING_LOG` overrides the path). Format, one event per line:
+///
+///     2026-09-12T23:47:45.766Z mono=123456.789 proc=hud event=state.observed from=idle to=recording
+///
+/// `mono` is `mach_absolute_time` in milliseconds, comparable across VoicePop processes.
 public enum Timing {
-    public static let enabled: Bool =
-        ProcessInfo.processInfo.environment["POPCORNHUD_TIMING"] == "1"
+    public static let defaultsDomain = "com.caleb.voicepop"
+    public static let defaultsKey = "VoicePopTiming"
+
+    public static let enabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if env["POPCORNHUD_TIMING"] == "1" { return true }
+        return CFPreferencesGetAppBooleanValue(defaultsKey as CFString, defaultsDomain as CFString, nil)
+    }()
+
+    private static let mirrorToStderr = ProcessInfo.processInfo.environment["POPCORNHUD_TIMING"] == "1"
 
     private static let timebase: mach_timebase_info_data_t = {
         var info = mach_timebase_info_data_t()
@@ -208,13 +226,89 @@ public enum Timing {
     }()
 
     public static func nowMs() -> UInt64 {
-        let info = timebase
-        let t = mach_absolute_time()
-        return t * UInt64(info.numer) / UInt64(info.denom) / 1_000_000
+        nowUs() / 1000
     }
 
+    public static func nowUs() -> UInt64 {
+        let info = timebase
+        return mach_absolute_time() * UInt64(info.numer) / UInt64(info.denom) / 1000
+    }
+
+    /// Short process tag used in log lines.
+    public static var processTag: String = {
+        let name = ProcessInfo.processInfo.processName.lowercased()
+        if name.contains("clean") { return "clean" }
+        if name.contains("popcornhud") || name.contains("voicepop") { return "hud" }
+        return name
+    }()
+
+    /// Free-form diagnostic line (kept for ad-hoc debugging).
     public static func log(_ msg: @autoclosure () -> String) {
         guard enabled else { return }
-        fputs("[timing] \(msg())\n", stderr)
+        event("note", ["msg": msg()])
+    }
+
+    /// Structured event. Field values must not contain transcript text.
+    public static func event(_ name: String, _ fields: @autoclosure () -> KeyValuePairs<String, String> = [:]) {
+        guard enabled else { return }
+        write(line(name: name, fields: fields(), monoUs: nowUs(), wall: Date()))
+    }
+
+    static func line(name: String, fields: KeyValuePairs<String, String>, monoUs: UInt64, wall: Date) -> String {
+        var out = wallFormatter.string(from: wall)
+        out += " mono=\(monoUs / 1000).\(String(format: "%03d", Int(monoUs % 1000)))"
+        out += " proc=\(processTag) event=\(name)"
+        for (k, v) in fields {
+            out += " \(k)=\(sanitize(v))"
+        }
+        return out + "\n"
+    }
+
+    private static func sanitize(_ v: String) -> String {
+        String(v.map { $0 == " " || $0 == "\n" || $0 == "=" ? "_" : $0 })
+    }
+
+    private static let wallFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    // MARK: File sink
+
+    public static var logURL: URL {
+        if let override = ProcessInfo.processInfo.environment["VOICEPOP_TIMING_LOG"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/VoicePop/timing.log")
+    }
+
+    private static let sinkLock = NSLock()
+    private static var sinkFD: Int32 = -2
+    static let rotateBytes: off_t = 4 << 20
+
+    private static func write(_ line: String) {
+        if mirrorToStderr { fputs("[timing] \(line)", stderr) }
+        sinkLock.lock()
+        defer { sinkLock.unlock() }
+        if sinkFD == -2 { sinkFD = openSink(logURL) }
+        guard sinkFD >= 0 else { return }
+        // One write per line: O_APPEND keeps concurrent HUD and voxtype-clean lines whole.
+        _ = line.utf8CString.withUnsafeBufferPointer { Darwin.write(sinkFD, $0.baseAddress, $0.count - 1) }
+    }
+
+    /// Creates the private log (dir 0700, file 0600), rotating once past `rotateBytes`.
+    static func openSink(_ url: URL) -> Int32 {
+        let dir = url.deletingLastPathComponent().path
+        if mkdir(dir, 0o700) != 0, errno != EEXIST { return -1 }
+        var st = stat()
+        if stat(url.path, &st) == 0, st.st_size > rotateBytes {
+            _ = rename(url.path, url.path + ".1")
+        }
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return -1 }
+        _ = fchmod(fd, 0o600)
+        return fd
     }
 }
