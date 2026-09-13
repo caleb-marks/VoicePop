@@ -2,9 +2,8 @@ import AppKit
 import Darwin
 import PopcornCore
 
-/// Voxtype daemon process control. Owned by the responsiveness/reliability workstream.
-/// Every entry point returns immediately; process work runs off the main thread and
-/// completions are delivered on the main queue.
+/// Voxtype daemon process control. Every entry point returns immediately; process work runs off
+/// the main thread and completions are delivered on the main queue.
 enum EngineControl {
     static let voxtypeBin = "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"
     static let voxtypeApp = "/Applications/Voxtype.app"
@@ -24,41 +23,60 @@ enum EngineControl {
         FileManager.default.isExecutableFile(atPath: voxtypeBin)
     }
 
-    /// Menu/Settings recording request. Fire-and-forget; state arrives through `StateWatcher`.
+    private static let processQueue = DispatchQueue(label: "com.caleb.voicepop.engine", qos: .userInitiated)
+    /// Main thread. Completions waiting for the restart already in progress.
+    private static var restartWaiters: [((Result<Void, Error>) -> Void)?]?
+
+    /// Menu/Settings recording request. Fire-and-forget; state arrives through `StateWatcher`,
+    /// so recording feedback appears only once the daemon actually records.
     static func record(_ command: RecordCommand) {
-        Timing.log("record request \(command.rawValue)")
-        runDetached(voxtypeBin, ["record", command.rawValue])
+        Timing.event("record.request", ["cmd": command.rawValue])
+        NotificationCenter.default.post(name: .voicePopRecordRequested, object: nil, userInfo: ["command": command.rawValue])
+        processQueue.async { runDetached(voxtypeBin, ["record", command.rawValue]) }
     }
 
-    /// Starts the daemon at launch when nothing else did (reboot/logout).
+    /// Starts the daemon at launch when nothing else did (reboot/logout). Checks run off main.
     static func startIfNotRunning() {
-        guard !VoxtypeDaemon.isLive(), isEngineInstalled else { return }
-        fputs("VoicePop: Voxtype daemon not running at launch; starting it\n", stderr)
-        restart()
+        processQueue.async {
+            guard !VoxtypeDaemon.isLive(), isEngineInstalled else { return }
+            fputs("VoicePop: Voxtype daemon not running at launch; starting it\n", stderr)
+            DispatchQueue.main.async { restart() }
+        }
     }
 
-    /// Restarts the daemon without blocking the caller.
+    /// Restarts the daemon without blocking the caller. Main thread. Calls made while a restart is
+    /// in progress join it instead of killing the daemon again.
     static func restart(completion: ((Result<Void, Error>) -> Void)? = nil) {
-        if let script = restartScriptPath() {
-            runDetached(script, [])
-            completion.map { cb in DispatchQueue.main.async { cb(.success(())) } }
-        } else {
-            DispatchQueue.global(qos: .userInitiated).async {
-                // Fallback: kill all, reopen app bundle, then suppress emoji tray.
-                let kill = Process()
-                kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-                kill.arguments = ["-x", "voxtype-bin"]
-                try? kill.run()
-                kill.waitUntilExit()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        if restartWaiters != nil {
+            restartWaiters?.append(completion)
+            return
+        }
+        restartWaiters = [completion]
+        Timing.event("engine.restart")
+        let finish: (Result<Void, Error>) -> Void = { result in
+            DispatchQueue.main.async {
+                let waiters = restartWaiters ?? []
+                restartWaiters = nil
+                waiters.forEach { $0?(result) }
+            }
+        }
+        processQueue.async {
+            if let script = restartScriptPath() {
+                // The script sleeps and retries; wait on this queue, never on main.
+                finish(runAndWait(script, []))
+                return
+            }
+            // Fallback: stop the daemon, reopen the app bundle (keeps its TCC identity), then
+            // suppress the emoji tray.
+            _ = runAndWait("/usr/bin/pkill", ["-x", "voxtype-bin"])
+            processQueue.asyncAfter(deadline: .now() + 1.0) {
+                DispatchQueue.main.async {
                     NSWorkspace.shared.openApplication(
                         at: URL(fileURLWithPath: voxtypeApp),
                         configuration: NSWorkspace.OpenConfiguration()
                     ) { _, error in
-                        DispatchQueue.main.async {
-                            scheduleMenubarSuppressRetries()
-                            if let error { completion?(.failure(error)) } else { completion?(.success(())) }
-                        }
+                        DispatchQueue.main.async { scheduleMenubarSuppressRetries() }
+                        finish(error.map { .failure($0) } ?? .success(()))
                     }
                 }
             }
@@ -85,6 +103,24 @@ enum EngineControl {
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         try? task.run()
+    }
+
+    /// Blocking; process queue only.
+    private static func runAndWait(_ bin: String, _ args: [String]) -> Result<Void, Error> {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: bin)
+        task.arguments = args
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+        } catch {
+            return .failure(error)
+        }
+        task.waitUntilExit()
+        return task.terminationStatus == 0
+            ? .success(())
+            : .failure(Failure(message: "\((bin as NSString).lastPathComponent) exited with status \(task.terminationStatus)"))
     }
 
     // MARK: - Suppress Voxtype emoji tray
