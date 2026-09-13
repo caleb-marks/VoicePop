@@ -37,7 +37,7 @@ A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, 
 
 ## Install
 
-**[Download for Mac — Apple Silicon](https://github.com/caleb-marks/VoicePop/releases/download/v1.1.3/VoicePop-1.1.3.dmg)**
+**[Download for Mac — Apple Silicon](https://github.com/caleb-marks/VoicePop/releases/latest/download/VoicePop.dmg)**
 
 
 Apple Silicon, macOS 13+.
@@ -46,7 +46,7 @@ Apple Silicon, macOS 13+.
 2. Open VoicePop. A setup checklist installs the speech engine, downloads the Parakeet model (~2.4 GB, once) with progress and retry, and guides the permissions Voxtype needs (**Accessibility**, **Input Monitoring**, **Microphone**) and a practice dictation. Reopen it any time from **Settings… → General → Check Setup…**.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
-Ad-hoc signed, not notarized. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**, once.
+Signed with a Developer ID certificate and notarized by Apple, so Gatekeeper opens it without an override.
 
 ## How it works
 
@@ -140,7 +140,7 @@ defaults delete com.caleb.voicepop VoicePopTiming
 
 ## Known limits
 
-Apple Silicon only. Not notarized. The `[whisper] initial_prompt` hint list is dead weight while Parakeet is active - vocabulary goes in `replacements.json` instead. Live warm-path latency targets in [docs/metrics.md](docs/metrics.md) are still unmeasured.
+Apple Silicon only. The `[whisper] initial_prompt` hint list is dead weight while Parakeet is active - vocabulary goes in `replacements.json` instead. Live warm-path latency targets in [docs/metrics.md](docs/metrics.md) are still unmeasured.
 
 ## Docs
 
