@@ -63,19 +63,20 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertEqual(store.load(), SetupChecklist.Evidence())
     }
 
-    func testLaterFailureEvidenceMakesEarlierSuccessStale() {
+    func testOnlyPermissionEvidenceMakesEarlierSuccessStale() {
         var list = SetupChecklist(engine: .done("ok"), model: .done("ok"))
         list.observeTranscript()
         list.observePracticeText("hello", secondsSinceTranscript: 1)
         XCTAssertTrue(list.isComplete)
 
-        XCTAssertFalse(list.invalidateEvidence(issue: nil, failure: nil))
-        XCTAssertTrue(list.invalidateEvidence(issue: .permissionsNeeded, failure: nil))
+        XCTAssertFalse(list.invalidateEvidence(issue: nil))
+        XCTAssertFalse(list.invalidateEvidence(issue: .lastDictationFailed(DictationFailure.noText.rawValue)),
+                       "an empty dictation is usually silence, not a revoked permission")
+        XCTAssertTrue(list.isComplete)
+
+        XCTAssertTrue(list.invalidateEvidence(issue: .permissionsNeeded))
         XCTAssertFalse(list.state(of: .permissions).isDone)
         XCTAssertTrue(list.state(of: .fnKey).isDone, "microphone evidence says nothing about the FN key")
-
-        list.invalidateEvidence(issue: nil, failure: .didNotStart)
-        XCTAssertFalse(list.state(of: .fnKey).isDone)
 
         list.observePracticeText("again", secondsSinceTranscript: 1)
         list.engineReinstalled()

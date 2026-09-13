@@ -85,6 +85,17 @@ enum SetupAssistant {
         return ModelIdentity.isInstalled(modelName, in: VoxtypeModel.installedNames())
     }
 
+    /// The model setup should download: the configured catalog model when the user chose one
+    /// (downloaded without changing the selection), otherwise the default Parakeet model, which is
+    /// also activated.
+    static func modelToInstall() -> (name: String, activate: Bool) {
+        if let configured = EngineProbe.probe().configuredModel,
+           let choice = VoxtypeModel.catalog.first(where: { ModelIdentity.same($0.id, configured) }) {
+            return (choice.id, false)
+        }
+        return (modelName, true)
+    }
+
     private static func isParakeetCapable(_ bin: String) -> Bool {
         guard FileManager.default.isExecutableFile(atPath: bin),
               let out = try? run(bin, ["info", "engines"]) else { return false }
@@ -205,11 +216,11 @@ enum SetupAssistant {
         try text.write(toFile: configPath, atomically: true, encoding: .utf8)
     }
 
-    static func downloadModel(report: @escaping (String, Double?) -> Void) throws {
+    static func downloadModel(_ name: String, activate: Bool, report: @escaping (String, Double?) -> Void) throws {
         let failure = LockedMessage()
         let result = try ProcessRunner.run(
             VoxtypeModel.bin,
-            ["setup", "--download", "--activate", "--model", modelName, "--progress-format", "json", "--quiet"],
+            ["setup", "--download"] + (activate ? ["--activate"] : []) + ["--model", name, "--progress-format", "json", "--quiet"],
             stdout: .discard,
             onStdoutLine: { line in
                 switch ModelDownloadProgress.parse(line: line) {
