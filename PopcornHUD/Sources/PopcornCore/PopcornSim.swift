@@ -39,6 +39,18 @@ public struct SimSnapshot: Equatable, Sendable {
     public var levelsUnavailable: Bool
 }
 
+/// Per-phase cost accumulated by `PopcornSim.step` while `collectTimings` is on (benchmarks only).
+public struct SimPhaseTimings: Equatable, Sendable {
+    public var steps = 0
+    public var emitNs: UInt64 = 0
+    public var integrateNs: UInt64 = 0
+    public var collideNs: UInt64 = 0
+    public var heapNs: UInt64 = 0
+    public init() {}
+}
+
+@inline(__always) private func uptimeNs() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
+
 private struct KernelPose {
     var x: Double
     var y: Double
@@ -75,6 +87,9 @@ public final class PopcornSim {
     private var burstDelay: Double = 0
     private var nextID: UInt64 = 0
     public private(set) var emittedCount = 0
+    /// Benchmark instrumentation. Off in the HUD; costs one branch per phase when off.
+    public var collectTimings = false
+    public var timings = SimPhaseTimings()
 
     private func clearEmission() {
         spawnAccum = 0
@@ -155,6 +170,7 @@ public final class PopcornSim {
     }
 
     public func step(dt: Double, peak: Float, peakFresh: Bool = true) {
+        let tStart = collectTimings ? uptimeNs() : 0
         capturePrevPoses()
 
         phase += dt
@@ -203,8 +219,17 @@ public final class PopcornSim {
         } else { clearEmission() }
         onsetBaseline += (heat - onsetBaseline) * (1 - exp(-Tunables.onsetBaselineRate * dt))
 
+        let tEmit = collectTimings ? uptimeNs() : 0
         integrate(dt: dt)
+        let tIntegrate = collectTimings ? uptimeNs() : 0
         if !reduceMotion { collide(dt: dt) }
+        if collectTimings {
+            let tCollide = uptimeNs()
+            timings.steps += 1
+            timings.emitNs += tEmit - tStart
+            timings.integrateNs += tIntegrate - tEmit
+            timings.collideNs += tCollide - tIntegrate
+        }
     }
 
     private func capturePrevPoses() {
@@ -243,6 +268,15 @@ public final class PopcornSim {
             guard let idx = kernels.firstIndex(where: { $0.settled }) else { break }
             kernels.remove(at: idx)
             settledCount -= 1
+        }
+    }
+
+    /// Benchmarks only: top the population up to `count` (≤ `maxKernels`) with airborne kernels
+    /// launched like ordinary pops, without recoil or emission bookkeeping. Consumes the RNG, so a
+    /// sim that calls this no longer matches an unfilled sim with the same seed.
+    public func benchmarkFill(to count: Int) {
+        while kernels.count < min(count, Tunables.maxKernels) {
+            spawnKernel(burst: false)
         }
     }
 

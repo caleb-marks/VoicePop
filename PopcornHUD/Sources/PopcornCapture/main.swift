@@ -4,13 +4,18 @@ import PopcornArt
 import PopcornCore
 import SwiftUI
 
+MainActor.assumeIsolated { PopcornCapture.main() }
+
 /// Offscreen quiet→normal→loud→accents→silence capture for docs/visuals.
-@main
 @MainActor
 struct PopcornCapture {
     static func main() {
         let _ = NSApplication.shared
         let args = Array(CommandLine.arguments.dropFirst())
+        if args.first == "--bench" {
+            Bench.run(args: Array(args.dropFirst()))
+            return
+        }
         let outDir = args.first
             ?? FileManager.default.currentDirectoryPath + "/docs/visuals"
         let mascot: Mascot = args.dropFirst().first == "beagle" ? .beagle : .popcorn
