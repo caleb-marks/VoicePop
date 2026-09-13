@@ -85,6 +85,13 @@ struct SettingsDictationView: View {
                 Text("Optional. Runs entirely on this Mac over loopback - no text ever leaves the device.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let error = store.saveError {
+                    HStack {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        Button("Retry") { store.save() }
+                    }
+                }
             }
         }
         .formStyle(.grouped)
@@ -134,18 +141,18 @@ final class ModelListViewModel: ObservableObject {
     @Published var downloadMessage = ""
     @Published var failure: String?
 
-    // Resolve lazily: Settings can be built before the health monitor is attached.
+    /// Read lazily (like `SettingsStore.attachHealthIfNeeded`, L-1) rather than captured at init,
+    /// so a Settings window built before `AppDelegate` sets `health` still reports downloads once
+    /// it's available. `INTERFACES.md` #6: Settings downloads must report to
+    /// `health.noteModelDownload` (M-6) so the menu headline shows "Downloading speech model… N%"
+    /// instead of staying "Ready" during a Settings-initiated download. A test seam (a fixture
+    /// can replace this closure) - kept as the one path so notes are never sent twice through two
+    /// different properties, which an earlier merge had left this type doing.
     var healthProvider: () -> DictationHealthMonitor? = { SettingsWindowController.shared.health }
     var runner: ModelInstallRunning = LiveModelInstallRunner()
     /// Harness-only: true when this instance was pre-seeded with fixture state, so `onAppear`
     /// doesn't immediately overwrite it by probing the live engine.
     var skipAutoRefresh = false
-    /// Read lazily (like `SettingsStore.attachHealthIfNeeded`, L-1) rather than captured at init,
-    /// so a Settings window built before `AppDelegate` sets `health` still reports downloads once
-    /// it's available. `INTERFACES.md` #6: Settings downloads must report to
-    /// `health.noteModelDownload` (M-6) so the menu headline shows "Downloading speech model… N%"
-    /// instead of staying "Ready" during a Settings-initiated download.
-    var health: DictationHealthMonitor? { SettingsWindowController.shared.health }
 
     func refresh() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -174,51 +181,54 @@ final class ModelListViewModel: ObservableObject {
         failure = nil
         let needsDownload = !installed.contains { VoxtypeModel.matches($0, catalogID: catalogID) }
         downloadingID = catalogID
+        // Resolved once, up front, and used directly in the completion/failure blocks below
+        // rather than through `self` (N2-L8): if the Settings window (and so this view model) is
+        // closed and deallocated mid-download, health still needs to hear that the download
+        // ended, and the engine still needs its restart - neither should silently no-op just
+        // because nothing is observing the UI anymore.
+        let health = healthProvider()
         if needsDownload {
-            healthProvider()?.noteModelDownload(.init(model: id, fraction: nil))
+            health?.noteModelDownload(EngineFacts.Download(model: id, fraction: nil))
             downloadFraction = nil
             downloadMessage = "Downloading…"
-            health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: nil))
         }
         let runner = self.runner
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 if needsDownload {
                     try runner.download(id) { event in
-                        DispatchQueue.main.async {
-                            guard let self else { return }
-                            switch event {
-                            case .progress(let fraction, let bytesGB, let totalGB):
-                                self.healthProvider()?.noteModelDownload(.init(model: id, fraction: fraction))
-                                self.downloadFraction = fraction
-                                self.downloadMessage = String(format: "Downloading… %.1f of %.1f GB", bytesGB, totalGB)
-                                self.health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: fraction))
-                            case .failure(let message):
-                                self.failure = message
+                        switch event {
+                        case .progress(let fraction, let bytesGB, let totalGB):
+                            // DictationHealthMonitor is main-thread only, like the rest of this
+                            // view model's own @Published writes.
+                            DispatchQueue.main.async {
+                                health?.noteModelDownload(EngineFacts.Download(model: id, fraction: fraction))
+                                self?.downloadFraction = fraction
+                                self?.downloadMessage = String(format: "Downloading… %.1f of %.1f GB", bytesGB, totalGB)
                             }
+                        case .failure(let message):
+                            DispatchQueue.main.async { self?.failure = message }
                         }
                     }
                 }
                 try runner.setModel(id)
-                guard let self else { return }
-                DispatchQueue.main.async { [self] in
-                    self.healthProvider()?.noteModelDownload(nil)
+                DispatchQueue.main.async {
+                    health?.noteModelDownload(nil)
+                    EngineControl.restart()
+                    guard let self else { return }
                     self.downloadingID = nil
                     self.installed.insert(id)
                     self.current = id
-                    // Completed: clear the download indicator health reports through the menu.
-                    self.health?.noteModelDownload(nil)
-                    EngineControl.restart()
                 }
             } catch {
                 DispatchQueue.main.async {
+                    // Clear the download indicator regardless of whether the view model is still
+                    // around to show `failure` - otherwise the menu keeps reporting a download
+                    // that is no longer happening.
+                    health?.noteModelDownload(nil)
                     guard let self else { return }
-                    self.healthProvider()?.noteModelDownload(nil)
                     self.downloadingID = nil
                     self.failure = error.localizedDescription
-                    // Failed: also clear it, rather than leaving the menu showing a download
-                    // that is no longer happening.
-                    self.health?.noteModelDownload(nil)
                 }
             }
         }
