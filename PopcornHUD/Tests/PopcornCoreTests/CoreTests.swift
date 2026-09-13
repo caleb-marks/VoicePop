@@ -192,7 +192,12 @@ final class StyleTests: XCTestCase {
         try Data("{".utf8).write(to: url)
         XCTAssertEqual(StylePrefs.load(from: url), .default)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathExtension("bad").path))
+        // polish-shared (WS2, review-1 L-13): quarantine now uses a timestamped `.bad-<time>`
+        // name (VoicePopPaths.quarantine) so a second corruption never destroys an earlier
+        // quarantined copy, instead of a fixed `.bad` name three call sites used to duplicate.
+        let quarantined = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("style.json.bad-") }
+        XCTAssertEqual(quarantined.count, 1)
     }
     func testMascotDefaultsToPopcornAndRoundTrips() throws {
         let empty = try JSONDecoder().decode(StylePrefs.self, from: Data(#"{}"#.utf8))

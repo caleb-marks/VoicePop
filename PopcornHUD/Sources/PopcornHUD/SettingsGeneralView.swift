@@ -3,45 +3,28 @@ import SwiftUI
 import PopcornCore
 
 /// General tab (§3): startup preference, FN/Globe shortcut guidance, live setup/recovery status,
-/// transcript history, and advanced config-file access.
+/// transcript history, and advanced config-file access. Status comes from `store.status`, which
+/// `SettingsStore` observes once for the whole window (see its doc comment) rather than this view
+/// adding its own permanent `DictationHealthMonitor` listener on every `onAppear`.
 struct SettingsGeneralView: View {
     @ObservedObject var store: SettingsStore
-    let health: DictationHealthMonitor?
-    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): seeds the status section without a real
-    /// `DictationHealthMonitor`, so both a healthy and an issue state can be rendered offscreen.
-    var fixtureStatus: DictationStatus?
 
     // Starts false and is corrected by an async probe in onAppear - SMAppService.status is a
     // synchronous XPC round trip and must not run on the main thread during view init.
     @State private var loginEnabled = false
     @State private var loginItemError: String?
-    @State private var status = DictationStatus(daemon: .missing, facts: EngineFacts())
     @State private var showClearHistoryConfirm = false
     @State private var clearHistoryError: String?
 
-    init(store: SettingsStore, health: DictationHealthMonitor?, fixtureStatus: DictationStatus? = nil) {
+    init(store: SettingsStore) {
         self.store = store
-        self.health = health
-        self.fixtureStatus = fixtureStatus
-        if let fixtureStatus { _status = State(initialValue: fixtureStatus) }
     }
 
     var body: some View {
         Form {
             Section {
-                Toggle("Open VoicePop at Login", isOn: $loginEnabled)
+                Toggle("Open VoicePop at Login", isOn: loginToggleBinding)
                     .disabled(!LoginItem.isAvailable)
-                    .onChange(of: loginEnabled) { newValue in
-                        // Optimistic: the switch already shows newValue. Revert it and show an
-                        // inline error if the XPC call fails, instead of blocking on it here.
-                        loginItemError = nil
-                        LoginItem.setEnabledAsync(newValue) { result in
-                            if case .failure(let error) = result {
-                                loginEnabled = !newValue
-                                loginItemError = error.localizedDescription
-                            }
-                        }
-                    }
                     .accessibilityHint(LoginItem.isAvailable ? "" : loginUnavailableReason)
                 if !LoginItem.isAvailable {
                     Text(loginUnavailableReason)
@@ -65,12 +48,18 @@ struct SettingsGeneralView: View {
             }
 
             Section("Setup & recovery") {
-                Label(status.headline, systemImage: status.issue == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                    .foregroundStyle(status.issue == nil ? Color.primary : Color.orange)
-                    .accessibilityLabel(status.headline)
-                ForEach(status.actions, id: \.self) { action in
+                Label(store.status.headline, systemImage: store.status.issue == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                    .foregroundStyle(store.status.issue == nil ? Color.primary : Color.orange)
+                    .accessibilityLabel(store.status.headline)
+                // .openSetup is folded into the always-visible "Check Setup…" button below (M-3),
+                // so it never appears twice.
+                ForEach(store.status.actions.filter { $0 != .openSetup }, id: \.self) { action in
                     Button(title(for: action)) { perform(action) }
                 }
+                // Always reachable, not only when something is already wrong - §6 "Make setup
+                // accessible from Settings" (M-3). README and the checklist footer both promise
+                // this path exists even while everything is healthy.
+                Button("Check Setup…") { SetupAssistant.presentChecklist() }
             }
 
             Section("Transcript history") {
@@ -87,14 +76,19 @@ struct SettingsGeneralView: View {
                     let path = NSString(string: "~/.config/voxtype/config.toml").expandingTildeInPath
                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 }
+                // Direct file editing as an advanced action (§3) - previously only the Voxtype
+                // config had this; Learned Words' own file had no such escape hatch (L-18).
+                Button("Open Learned Words File") {
+                    if !FileManager.default.fileExists(atPath: VoicePopPaths.replacements.path) {
+                        try? Replacements().save()
+                    }
+                    NSWorkspace.shared.open(VoicePopPaths.replacements)
+                }
             }
         }
         .formStyle(.grouped)
         .onAppear {
             LoginItem.isEnabledAsync { loginEnabled = $0 }
-            health?.addListener { newStatus in
-                status = newStatus
-            }
         }
         .alert("Clear transcript history?", isPresented: $showClearHistoryConfirm) {
             Button("Clear History", role: .destructive) { clearHistory() }
@@ -102,6 +96,28 @@ struct SettingsGeneralView: View {
         } message: {
             Text("This permanently removes the current and rotated transcript history. Saved corrections, learned words, and writing styles stay in place.")
         }
+    }
+
+    /// The *only* path that calls `LoginItem.setEnabledAsync` (H-1). A plain `@State` + `onChange`
+    /// pair also fires `onChange` for the programmatic writes `onAppear`'s probe and this
+    /// binding's own failure-revert perform - which previously meant opening Settings, or a
+    /// failed toggle, called `register()`/`unregister()` again and could ping-pong. Writing
+    /// `loginEnabled` directly (as `onAppear` and the revert below do) is a plain `@State`
+    /// mutation that never re-enters this `set`.
+    private var loginToggleBinding: Binding<Bool> {
+        Binding(
+            get: { loginEnabled },
+            set: { newValue in
+                loginEnabled = newValue
+                loginItemError = nil
+                LoginItem.setEnabledAsync(newValue) { result in
+                    if case .failure(let error) = result {
+                        loginEnabled = !newValue
+                        loginItemError = error.localizedDescription
+                    }
+                }
+            }
+        )
     }
 
     private var loginUnavailableReason: String {
@@ -130,7 +146,9 @@ struct SettingsGeneralView: View {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
                 NSWorkspace.shared.open(url)
             }
-        case .openSettings: break
+        // Already inside Settings, so "Open Settings…" only makes sense as "go to the tab with
+        // more detail" (L-11) - previously a no-op.
+        case .openSettings: SettingsWindowController.shared.show(.dictation)
         case .copyLastText:
             LastHistoryEntryCache.currentAsync { entry in
                 guard let text = entry?.out else { return }
@@ -143,6 +161,9 @@ struct SettingsGeneralView: View {
     private func clearHistory() {
         do {
             try HistoryStore.clear()
+            // Otherwise the menu's "Fix Last Dictation…" and Copy Last Text keep showing the
+            // just-deleted transcript until something else happens to trigger a reload (L-3).
+            LastHistoryEntryCache.clear()
             clearHistoryError = nil
         } catch {
             clearHistoryError = error.localizedDescription

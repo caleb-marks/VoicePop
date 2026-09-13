@@ -110,11 +110,21 @@ public enum LastHistoryEntryCache {
     private static var generation: UInt64 = 0
 
     /// Cached value only - never touches disk. `nil` both "no dictation yet" and "not loaded
-    /// yet"; callers that must tell those apart use `currentAsync`.
+    /// yet"; callers that must tell those apart use `currentAsync` or `isKnownEmpty`.
     public static func current() -> HistoryEntry? {
         lock.lock()
         defer { lock.unlock() }
         return cached
+    }
+
+    /// True once the cache has been loaded at least once and confirmed there is no history entry
+    /// - as opposed to `current() == nil`, which is also true before the first load ever
+    /// completes. Lets a caller (L-10: "Fix Last Dictation") disable itself only once it is
+    /// certain there is truly nothing to fix, not merely because nothing has loaded yet.
+    public static func isKnownEmpty() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return loaded && cached == nil
     }
 
     /// Delivers the cached value on the main queue immediately if it has been loaded at least
@@ -150,6 +160,17 @@ public enum LastHistoryEntryCache {
             lock.unlock()
             if let completion { DispatchQueue.main.async { completion(result) } }
         }
+    }
+
+    /// Synchronously marks the cache empty-and-loaded. Call right after `HistoryStore.clear()`
+    /// succeeds (L-3): the caller already knows for a fact there is nothing left, so this is pure
+    /// bookkeeping, not a disk read, and is safe on the main thread.
+    public static func clear() {
+        lock.lock()
+        generation &+= 1
+        cached = nil
+        loaded = true
+        lock.unlock()
     }
 }
 
@@ -242,11 +263,7 @@ public struct Replacement: Codable, Equatable {
         self.to = try c.decode(String.self, forKey: .to)
         self.count = try c.decode(Int.self, forKey: .count)
         self.lastTs = try c.decode(String.self, forKey: .lastTs)
-        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
-            var extra = all
-            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
-            unknownFields = extra
-        }
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -255,19 +272,7 @@ public struct Replacement: Codable, Equatable {
         try c.encode(to, forKey: .to)
         try c.encode(count, forKey: .count)
         try c.encode(lastTs, forKey: .lastTs)
-        if !unknownFields.isEmpty {
-            struct ExtraKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int? { nil }
-                init?(intValue: Int) { nil }
-            }
-            var extra = encoder.container(keyedBy: ExtraKey.self)
-            for (key, value) in unknownFields {
-                guard let codingKey = ExtraKey(stringValue: key) else { continue }
-                try extra.encode(value, forKey: codingKey)
-            }
-        }
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 }
 
@@ -306,30 +311,14 @@ public struct Replacements: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         entries = try c.decodeIfPresent([Replacement].self, forKey: .entries) ?? []
-        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
-            var extra = all
-            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
-            unknownFields = extra
-        }
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(version, forKey: .version)
         try c.encode(entries, forKey: .entries)
-        if !unknownFields.isEmpty {
-            struct ExtraKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int? { nil }
-                init?(intValue: Int) { nil }
-            }
-            var extra = encoder.container(keyedBy: ExtraKey.self)
-            for (key, value) in unknownFields {
-                guard let codingKey = ExtraKey(stringValue: key) else { continue }
-                try extra.encode(value, forKey: codingKey)
-            }
-        }
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 
     /// Validates a Learned Words edit against the same rules `apply` uses at runtime, so an entry
@@ -347,6 +336,43 @@ public struct Replacements: Codable, Equatable {
             if DiffLearner.key(e.from) == key { return .duplicateFrom }
         }
         return nil
+    }
+
+    /// A single Learned Words edit, replayable against any `Replacements` value - in particular a
+    /// freshly re-read one, not necessarily the one the edit was made against (see `apply`).
+    public enum Mutation: Equatable {
+        case add(Replacement)
+        case update(originalFrom: String, from: String, to: String)
+        case delete(from: String)
+    }
+
+    /// Applies `mutation` in place. Used to replay a Settings edit against the file's current
+    /// on-disk state at save time instead of a possibly-stale in-memory copy (review-1 M-1): a
+    /// Settings session that loaded the file, then had the correction window learn new words
+    /// into it, then edits and saves, must not silently erase those new words by writing back
+    /// its stale snapshot. `add`/`update` overwrite-in-place (by `from` key) rather than
+    /// duplicating if the target key already exists (e.g. re-saving an unchanged add).
+    public mutating func apply(_ mutation: Mutation, now: Date = Date()) {
+        switch mutation {
+        case .add(let entry):
+            if let idx = entries.firstIndex(where: { $0.from == entry.from }) {
+                entries[idx] = entry
+            } else {
+                entries.append(entry)
+            }
+        case .update(let originalFrom, let from, let to):
+            if let idx = entries.firstIndex(where: { $0.from == originalFrom }) {
+                entries[idx].from = from
+                entries[idx].to = to
+            } else {
+                // The entry being edited was deleted or renamed concurrently (e.g. by another
+                // process editing the file) - add it back under the edited key rather than
+                // silently dropping the user's edit.
+                entries.append(Replacement(from: from, to: to, count: 1, lastTs: Self.iso8601.string(from: now)))
+            }
+        case .delete(let from):
+            entries.removeAll { $0.from == from }
+        }
     }
 
     public enum LoadResult: Equatable {
@@ -554,6 +580,7 @@ public final class CorrectionSaver {
     public enum SaveError: Error, LocalizedError, Equatable {
         case correctionAppendFailed(String)
         case replacementsCorrupt
+        case replacementsQuarantineFailed(String)
         case replacementsSaveFailed(String)
 
         public var errorDescription: String? {
@@ -561,7 +588,9 @@ public final class CorrectionSaver {
             case .correctionAppendFailed(let detail):
                 return "Couldn't save the correction. \(detail)"
             case .replacementsCorrupt:
-                return "replacements.json can't be read. It was moved aside to replacements.json.bad so it isn't overwritten; a fresh file will be created."
+                return "replacements.json can't be read. It was moved aside so it isn't overwritten; a fresh file will be created."
+            case .replacementsQuarantineFailed(let detail):
+                return "replacements.json can't be read, and moving it aside also failed (\(detail)). It was not changed."
             case .replacementsSaveFailed(let detail):
                 return "Couldn't save learned words. \(detail)"
             }
@@ -607,7 +636,11 @@ public final class CorrectionSaver {
 
         switch Replacements.inspect(from: replacementsURL) {
         case .corrupt:
-            Self.quarantine(replacementsURL)
+            do {
+                try VoicePopPaths.quarantine(replacementsURL)
+            } catch {
+                throw SaveError.replacementsQuarantineFailed(error.localizedDescription)
+            }
             throw SaveError.replacementsCorrupt
         case .missing:
             var r = Replacements()
@@ -618,11 +651,5 @@ public final class CorrectionSaver {
             do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
         }
         return true
-    }
-
-    private static func quarantine(_ url: URL) {
-        let bad = url.appendingPathExtension("bad")
-        try? FileManager.default.removeItem(at: bad)
-        try? FileManager.default.moveItem(at: url, to: bad)
     }
 }

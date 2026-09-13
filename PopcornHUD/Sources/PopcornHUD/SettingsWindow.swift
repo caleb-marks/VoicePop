@@ -45,6 +45,11 @@ final class SettingsWindowController {
         }
         // Pick up anything the menu bar changed (e.g. Writing Style) while the window was hidden.
         store.refreshFromCache()
+        // Retried on every show() (cheap - a bool check once attached): if the window was built
+        // via ⌘, before AppDelegate set `health` during first-run setup, this is how General and
+        // Appearance ever pick it up (L-1). attachHealthIfNeeded no-ops once already attached, so
+        // this can never register more than one listener for the window's lifetime (M-7).
+        store.attachHealthIfNeeded(health)
         select(section)
         NSApp.activate(ignoringOtherApps: true)
         windowController?.window?.makeKeyAndOrderFront(nil)
@@ -57,9 +62,9 @@ final class SettingsWindowController {
             let hosting: NSViewController
             switch section {
             case .general:
-                hosting = NSHostingController(rootView: SettingsGeneralView(store: store, health: health))
+                hosting = NSHostingController(rootView: SettingsGeneralView(store: store))
             case .appearance:
-                hosting = NSHostingController(rootView: SettingsAppearanceView(store: store, health: health))
+                hosting = NSHostingController(rootView: SettingsAppearanceView(store: store))
             case .dictation:
                 hosting = NSHostingController(rootView: SettingsDictationView(store: store))
             case .learnedWords:

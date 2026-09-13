@@ -34,6 +34,39 @@ public enum JSONValue: Codable, Equatable, Sendable {
     }
 }
 
+/// Shared "round-trip unknown JSON fields" plumbing, used by `StylePrefs`, `Replacements`, and
+/// `Replacement` so hand edits or a newer app version's fields survive a save from here instead
+/// of being silently dropped. Previously copied three times with a private `ExtraKey` in each.
+public enum UnknownFieldCapture {
+    struct ExtraKey: CodingKey {
+        var stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    /// Everything in the decoder's top-level object except `knownKeys`.
+    public static func extra(from decoder: Decoder, knownKeys: [String]) -> [String: JSONValue] {
+        guard let raw = try? decoder.singleValueContainer(),
+              let all = try? raw.decode([String: JSONValue].self)
+        else { return [:] }
+        var extra = all
+        for key in knownKeys { extra.removeValue(forKey: key) }
+        return extra
+    }
+
+    /// Encodes `fields` as additional top-level keys alongside whatever the caller already wrote
+    /// through its own `CodingKeys` container.
+    public static func encode(_ fields: [String: JSONValue], to encoder: Encoder) throws {
+        guard !fields.isEmpty else { return }
+        var extra = encoder.container(keyedBy: ExtraKey.self)
+        for (key, value) in fields {
+            guard let codingKey = ExtraKey(stringValue: key) else { continue }
+            try extra.encode(value, forKey: codingKey)
+        }
+    }
+}
+
 public enum Style: String, Codable, CaseIterable, Sendable { case auto, casual, formal }
 
 public enum Mascot: String, Codable, CaseIterable, Sendable { case popcorn, beagle }
@@ -101,11 +134,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
-            var extra = all
-            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
-            unknownFields = extra
-        }
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         if let raw = try c.decodeIfPresent(String.self, forKey: .global) {
             global = Style(rawValue: raw) ?? .auto
@@ -140,19 +169,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
         try c.encode(llm, forKey: .llm)
         try c.encode(learning, forKey: .learning)
         try c.encode(mascot.rawValue, forKey: .mascot)
-        if !unknownFields.isEmpty {
-            struct ExtraKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int? { nil }
-                init?(intValue: Int) { nil }
-            }
-            var extra = encoder.container(keyedBy: ExtraKey.self)
-            for (key, value) in unknownFields {
-                guard let codingKey = ExtraKey(stringValue: key) else { continue }
-                try extra.encode(value, forKey: codingKey)
-            }
-        }
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 
     public func resolve(app: String) -> Style {
@@ -170,10 +187,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
             return try JSONDecoder().decode(StylePrefs.self, from: data)
         } catch {
             fputs("VoicePop: style.json decode failed, using defaults\n", stderr)
-            let bad = url.appendingPathExtension("bad")
-            try? FileManager.default.removeItem(at: bad)
-            try? FileManager.default.moveItem(at: url, to: bad)
-            try? VoicePopPaths.secureFile(bad)
+            try? VoicePopPaths.quarantine(url)
             return .default
         }
     }
@@ -207,8 +221,10 @@ public enum VoicePopPaths {
     public static var corrections: URL { dir.appendingPathComponent("corrections.jsonl") }
     public static var replacements: URL { dir.appendingPathComponent("replacements.json") }
 
+    // Timestamped .bad-<time> quarantine files (see `quarantine`) are secured individually at
+    // quarantine time, not through this fixed list.
     static var privateFiles: [URL] {
-        [style, style.appendingPathExtension("bad"), history, historyRotated, corrections, replacements]
+        [style, history, historyRotated, corrections, replacements]
     }
 
     public static func ensureDir() throws {
@@ -225,6 +241,19 @@ public enum VoicePopPaths {
 
     public static func secureFile(_ url: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Moves a corrupt/malformed file aside instead of overwriting it - the one quarantine
+    /// implementation (L-13; previously `StylePrefs.load`, `CorrectionSaver.quarantine`, and
+    /// `LearnedWordsViewModel.quarantineAndStartFresh` each had their own, with inconsistent error
+    /// handling). The `.bad-<unix time>` suffix means a second corruption never destroys an
+    /// earlier quarantined copy the way a fixed `.bad` name would. Throws (rather than silently
+    /// claiming success) if the move itself fails, e.g. on permissions.
+    public static func quarantine(_ url: URL, now: Date = Date()) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let bad = url.appendingPathExtension("bad-\(Int(now.timeIntervalSince1970))")
+        try FileManager.default.moveItem(at: url, to: bad)
+        try? secureFile(bad)
     }
 }
 
