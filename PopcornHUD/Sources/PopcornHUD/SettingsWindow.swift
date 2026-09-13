@@ -43,6 +43,8 @@ final class SettingsWindowController {
         if windowController == nil {
             buildWindow()
         }
+        // Pick up anything the menu bar changed (e.g. Writing Style) while the window was hidden.
+        store.refreshFromCache()
         select(section)
         NSApp.activate(ignoringOtherApps: true)
         windowController?.window?.makeKeyAndOrderFront(nil)
@@ -74,7 +76,11 @@ final class SettingsWindowController {
         let window = NSWindow(contentViewController: tabs)
         window.title = "VoicePop Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 520, height: 460))
+        // 620 tall: the Dictation tab (6 models + writing style + polishing toggle) and General
+        // (shortcut guidance + live recovery actions) both clip important content at 460 - a
+        // download's progress row in particular must not require scrolling to notice.
+        window.setContentSize(NSSize(width: 520, height: 620))
+        window.minSize = NSSize(width: 480, height: 420)
         window.center()
         window.isReleasedWhenClosed = false
         windowController = NSWindowController(window: window)

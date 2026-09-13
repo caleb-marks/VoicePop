@@ -27,6 +27,19 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     /// so pressing Save again after a failure (Retry) never writes a duplicate.
     private var saver: CorrectionSaver?
 
+    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): builds and populates the window from a fixture
+    /// entry without touching `HistoryStore`, optionally showing the inline error+Retry state.
+    func presentFixture(entry: HistoryEntry, correctedText: String, errorMessage: String? = nil) {
+        self.entry = entry
+        self.saver = CorrectionSaver()
+        if !built { buildWindow() }
+        rawLabel?.stringValue = "What I heard: \(entry.raw)"
+        textView?.string = correctedText
+        setError(errorMessage)
+        guard let window else { return }
+        window.makeKeyAndOrderFront(nil)
+    }
+
     func present() {
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {

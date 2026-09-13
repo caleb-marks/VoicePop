@@ -4,13 +4,13 @@ import PopcornCore
 /// A live install path a test can swap for a fixture-driven one, so the Settings Dictation tab's
 /// download/switch UI can be exercised without ever spawning `voxtype-bin` or touching the
 /// network (the polish worktree must not download models or `config set` for real).
-protocol ModelInstallRunning {
-    func download(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws
+protocol ModelInstallRunning: Sendable {
+    func download(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws
     func setModel(_ name: String) throws
 }
 
 struct LiveModelInstallRunner: ModelInstallRunning {
-    func download(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws {
+    func download(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         try VoxtypeModel.streamDownload(name, onEvent: onEvent)
     }
     func setModel(_ name: String) throws {
@@ -49,8 +49,29 @@ enum VoxtypeModel {
 
     static let nameGlossary = "VoicePop, Voxtype, Ghostty, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
 
+    /// Packaging suffixes the engine may report on an installed/active model id that the catalog
+    /// doesn't spell out (e.g. the live engine reports `parakeet-tdt-0.6b-v3-int8-prepacked` for
+    /// the catalog's `parakeet-tdt-0.6b-v3-int8`). Stripped before comparing ids so the Settings
+    /// UI still recognizes the variant as the same catalog choice.
+    private static let packagingSuffixes = ["-prepacked"]
+
+    static func normalizedID(_ id: String) -> String {
+        var normalized = id
+        for suffix in packagingSuffixes where normalized.hasSuffix(suffix) {
+            normalized.removeLast(suffix.count)
+        }
+        return normalized
+    }
+
+    /// True when `id` (an installed/current model name from the engine, possibly with a
+    /// packaging suffix) refers to the same model as `catalogID`.
+    static func matches(_ id: String?, catalogID: String) -> Bool {
+        guard let id else { return false }
+        return id == catalogID || normalizedID(id) == normalizedID(catalogID)
+    }
+
     static func title(for id: String) -> String {
-        catalog.first { $0.id == id }?.title ?? id
+        catalog.first { matches(id, catalogID: $0.id) }?.title ?? id
     }
 
     struct Failure: Error, LocalizedError {
@@ -85,7 +106,7 @@ enum VoxtypeModel {
     /// Same download, but streams parsed progress events as they arrive instead of waiting for
     /// completion. Line parsing itself lives in `PopcornCore.ModelDownloadProgress`, which is
     /// unit-tested against fixture lines.
-    static func streamDownload(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws {
+    static func streamDownload(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             throw Failure(message: "Voxtype is not installed at \(bin)")
         }

@@ -7,11 +7,21 @@ import PopcornCore
 struct SettingsGeneralView: View {
     @ObservedObject var store: SettingsStore
     let health: DictationHealthMonitor?
+    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): seeds the status section without a real
+    /// `DictationHealthMonitor`, so both a healthy and an issue state can be rendered offscreen.
+    var fixtureStatus: DictationStatus?
 
     @State private var loginEnabled = LoginItem.isEnabled
     @State private var status = DictationStatus(daemon: .missing, facts: EngineFacts())
     @State private var showClearHistoryConfirm = false
     @State private var clearHistoryError: String?
+
+    init(store: SettingsStore, health: DictationHealthMonitor?, fixtureStatus: DictationStatus? = nil) {
+        self.store = store
+        self.health = health
+        self.fixtureStatus = fixtureStatus
+        if let fixtureStatus { _status = State(initialValue: fixtureStatus) }
+    }
 
     var body: some View {
         Form {
