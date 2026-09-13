@@ -225,21 +225,10 @@ final class SetupChecklistWindowController: NSObject, NSWindowDelegate {
         NotificationCenter.default.addObserver(forName: .voicePopRecordRequested, object: nil, queue: .main) { [weak self] _ in
             self?.lastMenuRecordRequest = Date()
         }
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let ctrl = Unmanaged<SetupChecklistWindowController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async {
-                    guard ctrl.window?.isVisible == true else { return }
-                    ctrl.model.observeTranscript()
-                }
-            },
-            VoicePopSignal.transcriptReady as CFString,
-            nil,
-            .deliverImmediately
-        )
+        health.addTranscriptReadyListener { [weak self] in
+            guard let self, self.window?.isVisible == true else { return }
+            self.model.observeTranscript()
+        }
     }
 
     func present(install: Bool, onServicesReady: (() -> Void)?) {

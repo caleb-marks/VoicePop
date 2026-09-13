@@ -206,122 +206,57 @@ enum SetupAssistant {
     }
 
     static func downloadModel(report: @escaping (String, Double?) -> Void) throws {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: VoxtypeModel.bin)
-        task.arguments = ["setup", "--download", "--activate", "--model", modelName, "--progress-format", "json", "--quiet"]
-        let out = Pipe()
-        let err = Pipe()
-        task.standardOutput = out
-        task.standardError = err
-        let buffer = LineBuffer()
-        let notes = DownloadNotes()
-        func consume(_ lines: [Data]) {
-            for line in lines {
-                guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                      let event = obj["event"] as? String else { continue }
-                if event == "error" {
-                    let msg = (obj["message"] as? String)
-                        ?? (obj["error"] as? String)
-                        ?? "Model download failed."
-                    notes.setError(msg)
-                    continue
+        let failure = LockedMessage()
+        let result = try ProcessRunner.run(
+            VoxtypeModel.bin,
+            ["setup", "--download", "--activate", "--model", modelName, "--progress-format", "json", "--quiet"],
+            stdout: .discard,
+            onStdoutLine: { line in
+                switch ModelDownloadProgress.parse(line: line) {
+                case .progress(let fraction, let bytesGB, let totalGB)?:
+                    report(String(format: "Downloading the speech model… %.1f of %.1f GB", bytesGB, totalGB), fraction)
+                case .failure(let message)?:
+                    failure.set(message)
+                case nil:
+                    break
                 }
-                guard event == "progress", let pct = obj["pct"] as? Double else { continue }
-                let bytes = (obj["bytes"] as? Double ?? 0) / 1_073_741_824
-                let total = (obj["total"] as? Double ?? 0) / 1_073_741_824
-                report(String(format: "Downloading the speech model… %.1f of %.1f GB", bytes, total), pct / 100)
             }
-        }
-        out.fileHandleForReading.readabilityHandler = { handle in
-            consume(buffer.append(handle.availableData))
-        }
-        let stderrBuffer = LineBuffer()
-        err.fileHandleForReading.readabilityHandler = { _ = stderrBuffer.append($0.availableData) }
-        try task.run()
-        task.waitUntilExit()
-        out.fileHandleForReading.readabilityHandler = nil
-        err.fileHandleForReading.readabilityHandler = nil
-        consume(buffer.append(out.fileHandleForReading.readDataToEndOfFile()))
-        _ = stderrBuffer.append(err.fileHandleForReading.readDataToEndOfFile())
-        if let detail = notes.error?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
+        )
+        if let detail = failure.value?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
             throw Failure(message: detail)
         }
-        guard task.terminationStatus == 0 else {
-            let detail = stderrBuffer.allText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.succeeded else {
+            let detail = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
             throw Failure(message: detail.isEmpty ? "Model download failed." : detail)
         }
     }
 
     // MARK: - Helpers
 
+    /// Short, bounded helper commands (`info engines`, `codesign --verify`, `open`).
     @discardableResult
-    private static func run(_ bin: String, _ args: [String]) throws -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        let out = Pipe()
-        let err = Pipe()
-        task.standardOutput = out
-        task.standardError = err
-        try task.run()
-        let group = DispatchGroup()
-        var stderr = ""
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            group.leave()
+    private static func run(_ bin: String, _ args: [String], timeout: TimeInterval = 60) throws -> String {
+        let result = try ProcessRunner.run(bin, args, timeout: timeout)
+        guard result.succeeded else {
+            let detail = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = (bin as NSString).lastPathComponent
+            if result.timedOut { throw Failure(message: "\(name) \(args.joined(separator: " ")) timed out.") }
+            throw Failure(message: detail.isEmpty ? "\(name) \(args.joined(separator: " ")) failed (\(result.status))" : detail)
         }
-        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        group.wait()
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else {
-            let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Failure(message: detail.isEmpty ? "\((bin as NSString).lastPathComponent) \(args.joined(separator: " ")) failed (\(task.terminationStatus))" : detail)
-        }
-        return stdout
-    }
-}
-
-/// Thread-safe byte accumulator that hands back complete lines.
-private final class LineBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-    private var all = Data()
-
-    /// Appends bytes and returns every complete line received so far.
-    func append(_ chunk: Data) -> [Data] {
-        lock.lock(); defer { lock.unlock() }
-        all.append(chunk)
-        data.append(chunk)
-        var lines: [Data] = []
-        while let nl = data.firstIndex(of: 0x0A) {
-            lines.append(Data(data[data.startIndex..<nl]))
-            data.removeSubrange(data.startIndex...nl)
-        }
-        return lines
-    }
-
-    var text: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: data, encoding: .utf8) ?? ""
-    }
-
-    var allText: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: all, encoding: .utf8) ?? ""
+        return result.stdoutText
     }
 }
 
 /// Thread-safe slot for a download-progress JSON error event.
-private final class DownloadNotes: @unchecked Sendable {
+private final class LockedMessage: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: String?
 
-    func setError(_ message: String) {
+    func set(_ message: String) {
         lock.lock(); stored = message; lock.unlock()
     }
 
-    var error: String? {
+    var value: String? {
         lock.lock(); defer { lock.unlock() }
         return stored
     }
