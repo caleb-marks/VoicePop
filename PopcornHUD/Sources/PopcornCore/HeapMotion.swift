@@ -71,6 +71,8 @@ struct HeapMotion {
     private(set) var previous: [HeapPose]
     private var noise: [HeapPose]
     private var accel: [HeapPose]
+    private let surfaceWeights: [[Double]]
+    private var surfaceTable: [Double]
     private(set) var energy: Double = 0
     private(set) var asleep = true
     private var rng: SeededRNG
@@ -84,6 +86,8 @@ struct HeapMotion {
         previous = zeros
         noise = zeros
         accel = zeros
+        surfaceWeights = Self.makeSurfaceWeights(pieces)
+        surfaceTable = [Double](repeating: 0, count: Self.surfaceSamples)
         rng = SeededRNG(seed: seed ^ 0x6865_6170_6D6F_7465)
     }
 
@@ -214,7 +218,7 @@ struct HeapMotion {
                 quiet = false
             }
         }
-        if quiet { settleToRest() }
+        if quiet { settleToRest() } else { updateSurfaceTable() }
     }
 
     private mutating func settleToRest() {
@@ -223,6 +227,7 @@ struct HeapMotion {
             velocity[i] = .rest
             noise[i] = .rest
         }
+        for j in surfaceTable.indices { surfaceTable[j] = 0 }
         energy = 0
         asleep = true
     }
@@ -268,14 +273,34 @@ struct HeapMotion {
     /// the pieces that form the top layer there. Collisions and resting kernels follow it.
     func surfaceOffset(atX x: Double) -> Double {
         if asleep { return 0 }
-        var sum = 0.0, weight = 0.0
-        for i in pieces.indices {
-            let rx = pieces[i].restX - x
-            let w = exp(-rx * rx / 200) * (0.25 + pieces[i].exposure)
-            sum += pose[i].dy * w
-            weight += w
+        let u = (x - Self.surfaceStartX) / Self.surfaceSpacing
+        let lo = max(0, min(surfaceTable.count - 2, Int(u.rounded(.down))))
+        let t = max(0, min(1, u - Double(lo)))
+        return surfaceTable[lo] + (surfaceTable[lo + 1] - surfaceTable[lo]) * t
+    }
+
+    /// The surface is sampled every `surfaceSpacing` pt once per step, so the many collision and
+    /// resting-kernel queries per step are table lookups instead of sums over every piece.
+    static let surfaceStartX = -72.0
+    static let surfaceSpacing = 8.0
+    static let surfaceSamples = 19
+
+    private static func makeSurfaceWeights(_ pieces: [Piece]) -> [[Double]] {
+        (0..<surfaceSamples).map { j in
+            let x = surfaceStartX + Double(j) * surfaceSpacing
+            let raw = pieces.map { exp(-($0.restX - x) * ($0.restX - x) / 200) * (0.25 + $0.exposure) }
+            let total = max(1e-9, raw.reduce(0, +))
+            return raw.map { $0 / total }
         }
-        return weight > 1e-6 ? sum / weight : 0
+    }
+
+    private mutating func updateSurfaceTable() {
+        for j in surfaceTable.indices {
+            var sum = 0.0
+            let w = surfaceWeights[j]
+            for i in pose.indices { sum += pose[i].dy * w[i] }
+            surfaceTable[j] = sum
+        }
     }
 
     func interpolated(_ t: Double, into out: inout [HeapPose]) {

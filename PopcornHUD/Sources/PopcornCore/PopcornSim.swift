@@ -520,39 +520,43 @@ public final class PopcornSim {
 
         let n = kernels.count
         guard n > 1 else { return }
-        for a in 0..<n where !kernels[a].settled {
-            for b in (a + 1)..<n where !kernels[b].settled {
-                var ka = kernels[a]
-                var kb = kernels[b]
-                if ka.front != kb.front { continue }
-                let dx = kb.x - ka.x
-                let dy = kb.y - ka.y
-                let dist = sqrt(dx * dx + dy * dy)
-                let minDist = ka.hitRadius + kb.hitRadius
-                if dist > 0.001, dist < minDist {
+        // Pairwise pass over raw storage: the O(n²) loop is the hottest code in the simulation,
+        // and element-wise array access (bounds and exclusivity checks, whole-struct copies)
+        // dominated it in unoptimized builds.
+        kernels.withUnsafeMutableBufferPointer { buffer in
+            guard let k = buffer.baseAddress else { return }
+            for a in 0..<n where !k[a].settled {
+                for b in (a + 1)..<n where !k[b].settled {
+                    // Cheap rejects first: different layer, or separated on one axis by more than
+                    // the contact distance (exact, so results match the full distance test).
+                    if k[a].front != k[b].front { continue }
+                    let dx = k[b].x - k[a].x
+                    let dy = k[b].y - k[a].y
+                    let minDist = k[a].hitRadius + k[b].hitRadius
+                    if abs(dx) >= minDist || abs(dy) >= minDist { continue }
+                    let dist = sqrt(dx * dx + dy * dy)
+                    guard dist > 0.001, dist < minDist else { continue }
                     let nx = dx / dist
                     let ny = dy / dist
                     let overlap = minDist - dist
-                    ka.x -= nx * overlap * 0.5
-                    ka.y -= ny * overlap * 0.5
-                    kb.x += nx * overlap * 0.5
-                    kb.y += ny * overlap * 0.5
-                    let rvx = ka.vx - kb.vx
-                    let rvy = ka.vy - kb.vy
+                    k[a].x -= nx * overlap * 0.5
+                    k[a].y -= ny * overlap * 0.5
+                    k[b].x += nx * overlap * 0.5
+                    k[b].y += ny * overlap * 0.5
+                    let rvx = k[a].vx - k[b].vx
+                    let rvy = k[a].vy - k[b].vy
                     let vn = rvx * nx + rvy * ny
                     if vn > 0 {
                         let j = vn * (1 + retain) * 0.5
-                        ka.vx -= j * nx
-                        ka.vy -= j * ny
-                        kb.vx += j * nx
-                        kb.vy += j * ny
-                        ka.rotV += -ny * j * 0.05
-                        kb.rotV += ny * j * 0.05
-                        ka.vx *= Tunables.friction
-                        kb.vx *= Tunables.friction
+                        k[a].vx -= j * nx
+                        k[a].vy -= j * ny
+                        k[b].vx += j * nx
+                        k[b].vy += j * ny
+                        k[a].rotV += -ny * j * 0.05
+                        k[b].rotV += ny * j * 0.05
+                        k[a].vx *= Tunables.friction
+                        k[b].vx *= Tunables.friction
                     }
-                    kernels[a] = ka
-                    kernels[b] = kb
                 }
             }
         }
