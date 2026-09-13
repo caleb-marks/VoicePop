@@ -72,16 +72,16 @@ enum UISnapshotHarness {
         func textViews(_ view: NSView) -> [NSTextView] {
             (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
         }
-        // Present a fixture entry, seed LastHistoryEntryCache to match it (so the real present()
-        // - which always resolves through the cache, not the fixture parameter - resolves to the
-        // *same* entry), simulate a user edit, then call the real present() and pump the run loop
-        // briefly for its async cache read to complete. This exercises the actual "same entry
-        // already open" path (N2-M2's fix), not just the fixture path.
-        let entry = HistoryEntry(
-            ts: "2026-01-01T00:00:00Z", app: "Ghostty", style: "casual",
-            raw: "raw fixture", rules: "rules fixture", out: "Fixture out.", llm: false
-        )
-        LastHistoryEntryCache.seedForTesting(entry)
+        // present() always re-reads history.jsonl for real (L-4), never trusting a seeded cache
+        // value - so this must use the *actual* fixture entry seedFixtures() wrote there, or a
+        // mismatched ts would take the "different entry" branch and, since the text was just
+        // marked dirty, block forever on the confirmation NSAlert's modal runModal() with no one
+        // to click it. (An earlier version of this check used a synthetic entry and hung the
+        // harness for exactly this reason - confirmed by running it.)
+        guard let entry = HistoryStore.last() else {
+            log.append("FAIL: verifyEditorRecovery found no seeded history entry")
+            return
+        }
         editor.presentFixture(entry: entry, correctedText: entry.out)
         guard let content = editor.window?.contentView,
               let text = textViews(content).first else {

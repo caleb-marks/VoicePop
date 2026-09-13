@@ -14,6 +14,12 @@ struct SettingsLearnedWordsView: View {
     @State private var newFrom = ""
     @State private var newTo = ""
     @State private var addError: String?
+    /// A List with no selection binding gives its rows no keyboard path at all - Tab skips
+    /// straight from the search field to the list's scroll view, never reaching a row's Edit or
+    /// Delete (flagged in review-2's harness key-view-loop walk). Selection restores standard
+    /// List keyboard handling: arrow keys move the selection, and Return/Space activate a row's
+    /// default action once VoiceOver/keyboard focus is on it.
+    @State private var selection: String?
     /// Harness-only: skips the disk load so an injected fixture model's state isn't overwritten.
     private let skipAutoLoad: Bool
 
@@ -87,7 +93,7 @@ struct SettingsLearnedWordsView: View {
             .padding([.horizontal, .top], 12)
             .padding(.bottom, 4)
 
-            List {
+            List(selection: $selection) {
                 Section {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -112,8 +118,17 @@ struct SettingsLearnedWordsView: View {
                     // would otherwise give ForEach duplicate identities).
                     ForEach(Array(filtered.enumerated()), id: \.offset) { _, entry in
                         row(entry)
+                            .tag(entry.from)
                     }
                 }
+            }
+            // Delete key deletes the selected row - a keyboard path to Delete that doesn't
+            // depend on Tab reaching the row's own Delete button (review-2: List rows had no
+            // keyboard path at all with no selection).
+            .onDeleteCommand {
+                guard let selection, let entry = model.entries.first(where: { $0.from == selection }) else { return }
+                model.delete(entry)
+                self.selection = nil
             }
             if let error = model.saveError {
                 HStack {
