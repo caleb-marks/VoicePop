@@ -26,6 +26,10 @@ final class DictationHealthMonitor {
     private let watcher: StateWatcher
     private let probe: () -> EngineProbeResult
     private let probeQueue = DispatchQueue(label: "com.caleb.voicepop.health", qos: .utility)
+    /// Serial so a session's baseline read always completes before its later history checks.
+    private let historyQueue = DispatchQueue(label: "com.caleb.voicepop.health.history", qos: .utility)
+    /// historyQueue-confined: last history entry when the current recording started.
+    private var historyBaseline: (start: Date, snapshot: HistorySnapshot)?
     private var listeners: [(id: Int, block: (DictationStatus) -> Void)] = []
     private var transcriptReadyListeners: [(id: Int, block: () -> Void)] = []
     private var historyAppendedListeners: [(id: Int, block: () -> Void)] = []
@@ -170,7 +174,13 @@ final class DictationHealthMonitor {
 
     private func daemonChanged(_ state: DaemonState) {
         let previous = status.daemon
-        if state.isHot, !previous.isHot { sessionStart = Date() }
+        if state.isHot, !previous.isHot {
+            let start = Date()
+            sessionStart = start
+            historyQueue.async { [weak self] in
+                self?.historyBaseline = (start, HistorySnapshot(last: HistoryStore.last()))
+            }
+        }
         tracker.stateChanged(state, atMs: Timing.nowMs())
         if !state.isHot { facts.audioLevelsUnavailable = false }
         syncTracker(daemon: state)
@@ -197,12 +207,11 @@ final class DictationHealthMonitor {
     /// Off main: does history hold text from the failed dictation? Only then is copy offered.
     private func checkHistoryForFailedSession() {
         guard let failure = trackerFailure, failure != .didNotStart, let start = sessionStart else { return }
-        probeQueue.async { [weak self] in
-            let hasText = HistoryStore.last().map {
-                DictationSessionTracker.historyEntry(ts: $0.ts, isFromSessionStartedAt: start)
-                    && !$0.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            } ?? false
-            DispatchQueue.main.async {
+        historyQueue.async { [weak self] in
+            guard let self else { return }
+            let baseline = self.historyBaseline.flatMap { $0.start == start ? $0.snapshot : nil }
+            let hasText = DictationSessionTracker.historyEntry(HistoryStore.last(), isFromSessionStartedAt: start, baseline: baseline)
+            DispatchQueue.main.async { [weak self] in
                 guard let self, self.trackerFailure == failure, self.sessionStart == start else { return }
                 self.update { $0.lastFailureHasText = hasText }
             }
@@ -274,6 +283,7 @@ final class DictationHealthMonitor {
                 : nil
             f.modelInstalled = result.modelInstalled
             f.modelTitle = result.configuredModel.map { VoxtypeModel.title(for: $0) }
+            f.configuredModel = result.configuredModel
         }
         if probeQueued {
             probeQueued = false

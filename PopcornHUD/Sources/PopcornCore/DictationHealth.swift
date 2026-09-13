@@ -18,6 +18,8 @@ public struct EngineFacts: Equatable, Sendable {
     /// nil until the first probe finishes.
     public var modelInstalled: Bool?
     public var modelTitle: String?
+    /// Configured model id from the engine probe; nil until known.
+    public var configuredModel: String?
     public var download: Download?
     /// True only with evidence (verified or functional check). Never inferred from silence alone.
     public var permissionsNeeded: Bool
@@ -91,21 +93,37 @@ public struct DictationStatus: Equatable, Sendable {
         self.facts = facts
     }
 
+    /// True when the download in progress is what dictation is waiting for: the configured model
+    /// (or unknown configuration), or any download while the configured model is missing. A
+    /// download of some other model while the current one works is informational only.
+    public var downloadBlocksDictation: Bool {
+        guard let d = facts.download else { return false }
+        if facts.modelInstalled == false { return true }
+        guard let configured = facts.configuredModel else { return true }
+        return ModelIdentity.same(d.model, configured)
+    }
+
     public var issue: DictationIssue? {
         if !facts.engineInstalled { return .engineNotInstalled }
-        if let d = facts.download { return .modelDownloading(fraction: d.fraction) }
-        if facts.modelInstalled == false { return .modelMissing }
+        // Downloading the missing model is the fix in progress; a restart cannot help yet.
+        if facts.modelInstalled == false {
+            if downloadBlocksDictation, let d = facts.download { return .modelDownloading(fraction: d.fraction) }
+            return .modelMissing
+        }
+        // A dead daemon hides nothing behind a download: its restart action must stay visible.
         if daemon == .missing { return .engineNotRunning }
+        if downloadBlocksDictation, let d = facts.download { return .modelDownloading(fraction: d.fraction) }
         if facts.permissionsNeeded { return .permissionsNeeded }
         if daemon.isHot, facts.audioLevelsUnavailable { return .audioLevelsUnavailable }
         if !daemon.isHot, !daemon.isTranscribing, let failure = facts.lastFailure { return .lastDictationFailed(failure) }
         return nil
     }
 
-    /// True when holding FN is expected to start a recording.
+    /// True when holding FN (or menu Start Recording) is expected to start a recording.
+    /// `.permissionsNeeded` is heuristic evidence (silent microphone), so recording stays allowed.
     public var canDictate: Bool {
         switch issue {
-        case nil, .audioLevelsUnavailable, .lastDictationFailed: return daemon != .missing
+        case nil, .audioLevelsUnavailable, .lastDictationFailed, .permissionsNeeded: return daemon != .missing
         default: return false
         }
     }
@@ -167,7 +185,10 @@ public struct DictationStatus: Equatable, Sendable {
         case .audioLevelsUnavailable:
             return "Recording continues, but VoicePop can’t show your voice level."
         case nil:
-            return nil
+            // A download of a model that isn't in use is shown, but doesn't block dictation.
+            guard let d = facts.download else { return nil }
+            if let f = d.fraction { return "Downloading “\(d.model)”… \(Int((f * 100).rounded()))%" }
+            return "Downloading “\(d.model)”…"
         }
     }
 

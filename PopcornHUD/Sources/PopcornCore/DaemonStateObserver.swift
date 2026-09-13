@@ -23,9 +23,58 @@ public enum DaemonProcess {
         kill(pid, 0) == 0 || errno == EPERM
     }
 
-    /// Verify the executable behind the PID, including when process-name lookup fails.
+    /// Guards against a stale PID file whose number now belongs to an unrelated process, without
+    /// tying VoicePop to one install location: Homebrew `voxtype`, `~/Applications/Voxtype.app`, and
+    /// dev builds all count. A failed lookup trusts `kill(pid, 0)` so it never hides a live daemon.
     public static func looksLikeVoxtype(_ pid: Int32) -> Bool {
-        ProcessIdentity.isRunning(pid: pid, executablePath: "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin")
+        looksLikeVoxtype(pid, executablePath: ProcessIdentity.executablePath(pid:))
+    }
+
+    public static func looksLikeVoxtype(_ pid: Int32, executablePath lookup: (Int32) -> String?) -> Bool {
+        guard let path = lookup(pid) else { return true }
+        return isVoxtypeExecutable(path)
+    }
+
+    /// `voxtype-bin` or `voxtype` anywhere, or any executable inside a `Voxtype.app` bundle.
+    public static func isVoxtypeExecutable(_ path: String) -> Bool {
+        let components = (path as NSString).pathComponents
+        let name = components.last?.lowercased() ?? ""
+        if name == "voxtype-bin" || name == "voxtype" { return true }
+        return components.dropLast().contains { $0.caseInsensitiveCompare("Voxtype.app") == .orderedSame }
+    }
+
+    /// Voxtype subcommands that are not the long-running daemon (one-shot CLI calls, helpers).
+    private static let nonDaemonSubcommands: Set<String> = [
+        "menubar", "transcribe", "setup", "config", "info", "configure", "status", "record",
+        "meeting", "check-update", "help",
+    ]
+
+    /// Whether argv (argv[0] first) starts the daemon: no subcommand (the default) or `daemon`.
+    public static func isDaemonInvocation(_ arguments: [String]) -> Bool {
+        var i = 1
+        while i < arguments.count {
+            let arg = arguments[i]
+            if arg == "-c" || arg == "--config" || arg == "--model" {
+                i += 2
+                continue
+            }
+            if arg.hasPrefix("-") {
+                i += 1
+                continue
+            }
+            return !nonDaemonSubcommands.contains(arg)
+        }
+        return true
+    }
+
+    /// Live Voxtype daemon processes, whatever their install location and PID file state.
+    public static func liveDaemonPIDs() -> [Int32] {
+        ProcessIdentity.allPIDs().filter { pid in
+            guard let path = ProcessIdentity.executablePath(pid: pid), isVoxtypeExecutable(path),
+                  let args = ProcessIdentity.arguments(pid: pid)
+            else { return false }
+            return isDaemonInvocation(args)
+        }
     }
 
     public static func isLive(pidPath: String = Paths.pid) -> Bool {

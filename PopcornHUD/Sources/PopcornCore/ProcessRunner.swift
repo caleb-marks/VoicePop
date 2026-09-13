@@ -37,7 +37,9 @@ public enum ProcessRunner {
     /// - Parameters:
     ///   - timeout: nil waits indefinitely.
     ///   - onStdoutLine: called for each complete stdout line as it arrives (on a reader thread),
-    ///     e.g. JSON progress; stdout is still captured when `stdout == .capture`.
+    ///     e.g. JSON progress; stdout is still captured when `stdout == .capture`. No call happens
+    ///     after `run` returns: a line in flight finishes first, later lines are dropped (a
+    ///     grandchild holding the pipe open cannot deliver progress after completion).
     public static func run(
         _ executable: String,
         _ arguments: [String] = [],
@@ -56,6 +58,7 @@ public enum ProcessRunner {
         let group = DispatchGroup()
         let outBox = DataBox()
         let errBox = DataBox()
+        let gate = LineGate()
         let wantsOut = stdout == .capture || onStdoutLine != nil
         let outPipe = wantsOut ? Pipe() : nil
         let errPipe = stderr == .capture ? Pipe() : nil
@@ -74,7 +77,7 @@ public enum ProcessRunner {
         try? errPipe?.fileHandleForWriting.close()
 
         if let outPipe {
-            drain(outPipe.fileHandleForReading, into: outBox, keep: stdout == .capture, lines: onStdoutLine, group: group)
+            drain(outPipe.fileHandleForReading, into: outBox, keep: stdout == .capture, lines: onStdoutLine.map { gate.wrap($0) }, group: group)
         }
         if let errPipe {
             drain(errPipe.fileHandleForReading, into: errBox, keep: true, lines: nil, group: group)
@@ -96,6 +99,7 @@ public enum ProcessRunner {
         // A grandchild can inherit the pipes and keep them open; return what was read after a
         // short wait instead of blocking on it (the reader thread finishes when the pipe closes).
         _ = group.wait(timeout: .now() + 1)
+        gate.close()
         return Result(status: task.terminationStatus, stdout: outBox.data, stderr: errBox.data, timedOut: timedOut)
     }
 
@@ -129,6 +133,26 @@ public enum ProcessRunner {
             return true
         } catch {
             return false
+        }
+    }
+
+    /// Delivers lines until closed; `close()` waits for a delivery in progress.
+    private final class LineGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var open = true
+
+        func wrap(_ deliver: @escaping (String) -> Void) -> (String) -> Void {
+            { [self] line in
+                lock.lock()
+                defer { lock.unlock() }
+                if open { deliver(line) }
+            }
+        }
+
+        func close() {
+            lock.lock()
+            open = false
+            lock.unlock()
         }
     }
 
