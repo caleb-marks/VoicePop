@@ -70,6 +70,15 @@ enum Bench {
         notes["machine"] = machineName()
         notes["units"] = "milliseconds"
 
+        // MARK: One-time (measured before anything else draws) kernel sprite painting (cold cache), per display scale.
+        for scale in [1.0, 2.0] {
+            let t0 = uptimeMs()
+            PopcornRenderer.prewarmKernelSprites(displayScale: scale)
+            let ms = uptimeMs() - t0
+            notes["sprites.coldPrewarm@\(Int(scale))x.ms"] = String(format: "%.1f", ms)
+            print(String(format: "sprites.coldPrewarm@%dx  %.1f ms (one time)", Int(scale), ms))
+        }
+
         // MARK: Simulation under sustained loud speech with accents.
         // 120 Hz display ticks (one fixed step each) and 60 Hz ticks (two steps each).
         func loudInput(_ tick: Int, hz: Int) -> (Float, Bool) {
