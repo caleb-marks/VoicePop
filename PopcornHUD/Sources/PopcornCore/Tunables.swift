@@ -142,6 +142,31 @@ public enum Tunables {
     }
 
     public static let staleAudioMs: Double = 250
+
+    // MARK: Pile motion (see `HeapMotion`)
+
+    /// Onset rise that produces a full-strength heap hop; smaller onsets hop proportionally.
+    public static let heapHopFullRise: Double = 0.5
+    /// Minimum time between heap hops, so only some syllables read as accents.
+    public static let heapHopRefractory: Double = 0.22
+    /// Launch disturbance at the crown (rim-relative y) for a full-energy pop, in pt/s at the
+    /// launch point: downward recoil, outward shove, and rocking spin (rad/s).
+    public static let heapLaunchDepth: Double = -34
+    public static let heapLaunchPush: Double = 10
+    public static let heapLaunchRadial: Double = 14
+    public static let heapLaunchSpin: Double = 1.2
+    public static let heapBurstAccent: Double = 1.6
+    /// Landing disturbance per pt/s of impact velocity, scaled by kernel mass (scale²).
+    public static let heapLandingGain: Double = 0.05
+    /// At most this many landings per step disturb the pile, bounding work under heavy fallout.
+    public static let heapMaxLandingsPerStep = 6
+    /// Resting kernels ride the pile surface on a damped spring (1/s², 1/s) and slide to a stop.
+    public static let restingStiffness: Double = 420
+    public static let restingDamping: Double = 26
+    public static let restingSlideDrag: Double = 5.5
+    public static let restingSpinDrag: Double = 6.5
+    /// Deepest a resting kernel nestles into the pile, in pt.
+    public static let restingNestleMax: Double = 3
 }
 
 public struct HeapPiece: Equatable, Sendable {

@@ -12,6 +12,19 @@ enum PopcornHUDMain {
 
     static func main() {
         let app = NSApplication.shared
+
+        // MARK: - UI Snapshot Harness (VOICEPOP_UI_SNAPSHOT) — WS2, see INTERFACES.md.
+        // No services (no status item, HUD, state watcher, daemon, login item, or setup): renders
+        // Settings sections, the correction window, and the setup checklist against
+        // VOICEPOP_CONFIG_DIR fixtures, writes PNGs to the given directory, and exits. Never runs
+        // in a normal launch - only reached when the env var is set.
+        if let outDir = ProcessInfo.processInfo.environment["VOICEPOP_UI_SNAPSHOT"], !outDir.isEmpty {
+            app.setActivationPolicy(.accessory)
+            UISnapshotHarness.run(outputDirectory: outDir)
+            exit(0)
+        }
+        // MARK: - End UI Snapshot Harness
+
         app.setActivationPolicy(.regular)
         app.delegate = delegate
         app.run()
@@ -49,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateWatcher.start()
         health.start()
         SettingsWindowController.shared.health = health
+        SetupChecklistWindowController.shared.attach(health: health)
 
         let status = StatusItemController()
         status.start(watcher: stateWatcher, health: health)
@@ -89,10 +103,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.show()
+    }
+
     private func installMainMenu() {
         let menubar = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit VoicePop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         menubar.addItem(appItem)

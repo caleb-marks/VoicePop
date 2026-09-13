@@ -22,6 +22,8 @@ public struct KernelBody: Equatable, Sendable {
     public var maxLife: Double
     public var settled: Bool
     public var hitRadius: Double
+    /// How far a resting kernel sits into the pile surface (pt); set when it lands.
+    public var nestle: Double = 0
 
     public var alpha: Double {
         max(0, min(1, (maxLife - life) / Tunables.cleanupFade))
@@ -37,7 +39,36 @@ public struct SimSnapshot: Equatable, Sendable {
     public var phase: Double
     public var bagVisible: Double // 1 = full bag, 0 = collapsed
     public var levelsUnavailable: Bool
+    /// Displacement of each `HeapSeed.pieces` entry, interpolated like the kernels. Empty means
+    /// every piece is at rest.
+    public var heap: [HeapPose]
+
+    public init(
+        kernels: [KernelBody], heat: Double, mood: Double, kick: Double, phase: Double,
+        bagVisible: Double, levelsUnavailable: Bool, heap: [HeapPose] = []
+    ) {
+        self.heap = heap
+        self.kernels = kernels
+        self.heat = heat
+        self.mood = mood
+        self.kick = kick
+        self.phase = phase
+        self.bagVisible = bagVisible
+        self.levelsUnavailable = levelsUnavailable
+    }
 }
+
+/// Per-phase cost accumulated by `PopcornSim.step` while `collectTimings` is on (benchmarks only).
+public struct SimPhaseTimings: Equatable, Sendable {
+    public var steps = 0
+    public var emitNs: UInt64 = 0
+    public var integrateNs: UInt64 = 0
+    public var collideNs: UInt64 = 0
+    public var heapNs: UInt64 = 0
+    public init() {}
+}
+
+@inline(__always) private func uptimeNs() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 
 private struct KernelPose {
     var x: Double
@@ -75,6 +106,9 @@ public final class PopcornSim {
     private var burstDelay: Double = 0
     private var nextID: UInt64 = 0
     public private(set) var emittedCount = 0
+    /// Benchmark instrumentation. Off in the HUD; costs one branch per phase when off.
+    public var collectTimings = false
+    public var timings = SimPhaseTimings()
 
     private func clearEmission() {
         spawnAccum = 0
@@ -89,6 +123,10 @@ public final class PopcornSim {
     private var prevPoses: [UInt64: KernelPose] = [:]
     private var prevKick: Double = 0
     private var drawScratch: [KernelBody] = []
+    private var heapScratch: [HeapPose] = []
+    var heapMotion: HeapMotion
+    private var hopRefractory: Double = 0
+    private var landingsThisStep = 0
     private static let sides: [Double] = [-1, 1]
 
     public init(seed: UInt64? = nil) {
@@ -97,10 +135,19 @@ public final class PopcornSim {
         } else {
             rng = SeededRNG.fromEnvironment()
         }
+        var probe = rng
+        heapMotion = HeapMotion(seed: probe.nextUInt64())
     }
+
+    /// Current heap displacement (not interpolated).
+    public var heapPoses: [HeapPose] { heapMotion.pose }
 
     public func reset(seed: UInt64? = nil) {
         if let seed { rng = SeededRNG(seed: seed) }
+        var probe = rng
+        heapMotion.reset(seed: probe.nextUInt64())
+        hopRefractory = 0
+        heapScratch.removeAll(keepingCapacity: true)
         kernels.removeAll(keepingCapacity: true)
         heat = 0
         mood = 0
@@ -155,10 +202,13 @@ public final class PopcornSim {
     }
 
     public func step(dt: Double, peak: Float, peakFresh: Bool = true) {
+        let tStart = collectTimings ? uptimeNs() : 0
         capturePrevPoses()
 
         phase += dt
         burstRefractory = max(0, burstRefractory - dt)
+        hopRefractory = max(0, hopRefractory - dt)
+        landingsThisStep = 0
 
         let raw = peak.isFinite && !levelsUnavailable && allowSpawn ? Double(max(0, min(1, peak))) : 0
         let quiet = Tunables.quietPeak
@@ -183,6 +233,10 @@ public final class PopcornSim {
             if peakFresh {
                 let rise = target - onsetBaseline
                 if rise > Tunables.onsetThreshold, burstRefractory <= 0, burstRemaining == 0 {
+                    if hopRefractory <= 0 {
+                        heapMotion.hop(strength: min(1, rise / Tunables.heapHopFullRise))
+                        hopRefractory = Tunables.heapHopRefractory
+                    }
                     burstRemaining = min(Tunables.burstCountMax, max(Tunables.burstCountMin,
                         Int((2 + rise * 5).rounded())))
                     burstDelay = 0
@@ -203,8 +257,21 @@ public final class PopcornSim {
         } else { clearEmission() }
         onsetBaseline += (heat - onsetBaseline) * (1 - exp(-Tunables.onsetBaselineRate * dt))
 
+        let tEmit = collectTimings ? uptimeNs() : 0
         integrate(dt: dt)
+        let tIntegrate = collectTimings ? uptimeNs() : 0
         if !reduceMotion { collide(dt: dt) }
+        let tCollide = collectTimings ? uptimeNs() : 0
+        let agitated = allowSpawn && !levelsUnavailable
+        heapMotion.step(dt: dt, drive: agitated ? heat : 0, enabled: !reduceMotion)
+        if collectTimings {
+            let tHeap = uptimeNs()
+            timings.steps += 1
+            timings.emitNs += tEmit - tStart
+            timings.integrateNs += tIntegrate - tEmit
+            timings.collideNs += tCollide - tIntegrate
+            timings.heapNs += tHeap - tCollide
+        }
     }
 
     private func capturePrevPoses() {
@@ -213,6 +280,7 @@ public final class PopcornSim {
             prevPoses[k.id] = KernelPose(x: k.x, y: k.y, rot: k.rot)
         }
         prevKick = kick
+        heapMotion.capturePrevious()
     }
 
     private func emit(burst: Bool) -> Bool {
@@ -243,6 +311,15 @@ public final class PopcornSim {
             guard let idx = kernels.firstIndex(where: { $0.settled }) else { break }
             kernels.remove(at: idx)
             settledCount -= 1
+        }
+    }
+
+    /// Benchmarks only: top the population up to `count` (≤ `maxKernels`) with airborne kernels
+    /// launched like ordinary pops, without recoil or emission bookkeeping. Consumes the RNG, so a
+    /// sim that calls this no longer matches an unfilled sim with the same seed.
+    public func benchmarkFill(to count: Int) {
+        while kernels.count < min(count, Tunables.maxKernels) {
+            spawnKernel(burst: false)
         }
     }
 
@@ -285,10 +362,63 @@ public final class PopcornSim {
         let maxLaunch = sqrt(2 * Tunables.gravity * max(1, body.y - r0 - 18))
         body.vy = -min(launch, maxLaunch)
         kernels.append(body)
+        if !reduceMotion {
+            // The pop shoves the crown it bursts out of: pieces around the mouth recoil outward
+            // and rock. Scaled by launch energy; accents push harder without adding kernels.
+            let energy = min(1.2, -body.vy / (Tunables.minLaunch + Tunables.launchRange))
+            let accent = burst ? Tunables.heapBurstAccent : 1
+            disturbPile(
+                x: body.x - cx, y: Tunables.heapLaunchDepth,
+                dvx: body.vx * 0.04, dvy: Tunables.heapLaunchPush * energy * accent,
+                radial: Tunables.heapLaunchRadial * energy * accent,
+                spin: Tunables.heapLaunchSpin * energy * accent
+            )
+        }
         nextID &+= 1
     }
 
+    /// Apply a pile disturbance (rim-relative coordinates, see `HeapMotion.disturb`) to the
+    /// decorative pieces and to kernels resting on the pile.
+    func disturbPile(x: Double, y: Double, dvx: Double, dvy: Double, radial: Double, spin: Double) {
+        guard !reduceMotion else { return }
+        heapMotion.disturb(x: x, y: y, dvx: dvx, dvy: dvy, radial: radial, spin: spin)
+        let cx = Double(Tunables.cardW) / 2
+        let bagTop = Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH)
+        let inv2s2 = 1 / (2 * HeapMotion.impulseRadius * HeapMotion.impulseRadius)
+        for i in kernels.indices where kernels[i].settled {
+            let rx = kernels[i].x - cx - x
+            let ry = kernels[i].y - bagTop - y
+            let d2 = rx * rx + ry * ry
+            let w = exp(-d2 * inv2s2) * 0.8
+            guard w > 0.02 else { continue }
+            let d = max(1, sqrt(d2))
+            kernels[i].vx = max(-40, min(40, kernels[i].vx + w * (dvx + radial * rx / d)))
+            kernels[i].vy = max(-60, min(60, kernels[i].vy + w * (dvy + radial * ry / d)))
+            kernels[i].rotV = max(-4, min(4, kernels[i].rotV + w * spin * (rx >= 0 ? 1 : -1)))
+        }
+    }
+
+    /// Tests only: a long-lived kernel already resting on the pile at `atOffsetX` from center.
+    func insertRestingKernelForTesting(atOffsetX offset: Double) {
+        let x = Double(Tunables.cardW) / 2 + offset
+        var body = KernelBody(
+            id: nextID, x: x, y: 0, vx: 0, vy: 0, rot: 0, rotV: 0, scale: 1, shape: 0, butter: 0.2,
+            life: 0, maxLife: 1_000, settled: true, hitRadius: Tunables.kernelRadius * 0.88
+        )
+        body.y = restingY(body)
+        kernels.append(body)
+        nextID &+= 1
+    }
+
+    /// Resting height for a kernel on the (displaced) pile surface.
+    private func restingY(_ k: KernelBody) -> Double {
+        let cx = Double(Tunables.cardW) / 2
+        return Tunables.heapSurface(x: k.x) + heapMotion.surfaceOffset(atX: k.x - cx) - k.hitRadius + k.nestle
+    }
+
     private func integrate(dt: Double) {
+        let cx = Double(Tunables.cardW) / 2
+        let restLimitX = Double(Tunables.mouthHalf) - 6
         var i = 0
         while i < kernels.count {
             var k = kernels[i]
@@ -309,6 +439,19 @@ public final class PopcornSim {
                     kernels.remove(at: i)
                     continue
                 }
+            } else if !reduceMotion {
+                // Resting on the pile: slide and spin down to a stop, ride the surface as the
+                // pile shifts, and stay free to be knocked by later landings and launches.
+                let target = restingY(k)
+                k.vy += (Tunables.restingStiffness * (target - k.y) - Tunables.restingDamping * k.vy) * dt
+                k.vx *= exp(-Tunables.restingSlideDrag * dt)
+                k.rotV *= exp(-Tunables.restingSpinDrag * dt)
+                k.x += k.vx * dt
+                k.y += k.vy * dt
+                k.rot += k.rotV * dt
+                if abs(k.x - cx) > restLimitX { k.x = cx + restLimitX * (k.x < cx ? -1 : 1); k.vx = 0 }
+                if k.y > target + 2 { k.y = target + 2; k.vy = min(0, k.vy) }
+                if k.y < target - 6 { k.y = target - 6; k.vy = max(0, k.vy) }
             }
             kernels[i] = k
             i += 1
@@ -325,16 +468,28 @@ public final class PopcornSim {
 
         for i in kernels.indices where !kernels[i].settled {
             var k = kernels[i]
-            let heapY = Tunables.heapSurface(x: k.x)
+            let heapY = Tunables.heapSurface(x: k.x) + heapMotion.surfaceOffset(atX: k.x - cx)
             let hitR = k.hitRadius
             if k.y + hitR > heapY, abs(k.x - cx) < mouth + 4, k.vy > 0 {
                 let overlap = k.y + hitR - heapY
                 k.y -= overlap
+                if landingsThisStep < Tunables.heapMaxLandingsPerStep {
+                    landingsThisStep += 1
+                    let mass = k.scale * k.scale
+                    let g = Tunables.heapLandingGain * mass
+                    disturbPile(
+                        x: k.x - cx, y: heapY - bagTop,
+                        dvx: max(-30, min(30, k.vx * g)), dvy: min(30, k.vy * g * 0.9),
+                        radial: min(20, k.vy * g * 0.4), spin: max(-2, min(2, k.vx * 0.01))
+                    )
+                }
                 if k.vy < 95 {
                     k.settled = true
                     k.vy = 0
-                    k.vx = 0
-                    k.rotV = 0
+                    // Keep a little of the impact so it slides and rolls to rest instead of freezing.
+                    k.vx = max(-40, min(40, k.vx * 0.35))
+                    k.rotV *= 0.3
+                    k.nestle = Double((k.id &* 2_654_435_761) % 1000) / 1000 * Tunables.restingNestleMax
                     k.maxLife = k.life + rng.next(in: 0.7...1.4)
                 } else {
                     k.vy *= -retain
@@ -399,6 +554,11 @@ public final class PopcornSim {
 
     private func snapshot(interp: Double) -> SimSnapshot {
         let t = max(0, min(1, interp))
+        if reduceMotion || heapMotion.asleep {
+            heapScratch.removeAll(keepingCapacity: true)
+        } else {
+            heapMotion.interpolated(t, into: &heapScratch)
+        }
         drawScratch.removeAll(keepingCapacity: true)
         if drawScratch.capacity < kernels.count {
             drawScratch.reserveCapacity(Tunables.maxKernels)
@@ -424,7 +584,8 @@ public final class PopcornSim {
             kick: kickOut,
             phase: phase,
             bagVisible: bagVisible,
-            levelsUnavailable: levelsUnavailable
+            levelsUnavailable: levelsUnavailable,
+            heap: heapScratch
         )
     }
 
