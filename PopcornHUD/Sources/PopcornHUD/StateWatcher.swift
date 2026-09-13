@@ -3,13 +3,17 @@ import Foundation
 import PopcornCore
 
 enum VoxtypeDaemon {
+    private static let lock = NSLock()
+    private static let executablePath = "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"
     private static var cachedPid: Int32 = 0
     private static var pidStampMs: UInt64 = 0
 
     static func isLive() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         let now = Timing.nowMs()
         if cachedPid != 0, now &- pidStampMs <= 1000 {
-            if kill(cachedPid, 0) == 0 { return true }
+            if ProcessIdentity.isRunning(pid: cachedPid, executablePath: executablePath) { return true }
             cachedPid = 0
         }
         guard let raw = try? String(contentsOfFile: Paths.pid, encoding: .utf8) else {
@@ -21,7 +25,7 @@ enum VoxtypeDaemon {
             cachedPid = 0
             return false
         }
-        guard kill(pid, 0) == 0 else {
+        guard ProcessIdentity.isRunning(pid: pid, executablePath: executablePath) else {
             cachedPid = 0
             return false
         }
