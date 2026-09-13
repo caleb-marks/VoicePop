@@ -166,14 +166,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Start Recording does nothing useful when dictation can't currently start (L-10) - offering
     /// it anyway while e.g. the engine isn't running invites a click that has no effect.
     /// Stop Recording (the same item, while hot) is always meaningful, so hot always enables it.
-    ///
-    /// Deliberately narrower than `!lastStatus.canDictate`: today's `canDictate` also goes false
-    /// while any model download is in progress or on the heuristic `permissionsNeeded` guess
-    /// (N2-L5), which would wrongly disable Start Recording during, say, a Settings download of a
-    /// model that isn't even the active one. Scoped to the three issues that truly mean dictation
-    /// cannot start right now. Switch to `lastStatus.canDictate` once WS3 narrows it.
+    /// `canDictate` is now the properly narrowed rule (N2-L5, WS3): true through
+    /// `.permissionsNeeded` (heuristic) and through a download of a model that isn't the
+    /// configured one, false for engineNotInstalled/modelMissing/engineNotRunning and a download
+    /// that actually blocks dictation.
     private var startRecordingEnabled: Bool {
-        // polish-shared (lead): one definition of "dictation can start" with health.
         lastState.isHot || lastStatus.canDictate
     }
 
