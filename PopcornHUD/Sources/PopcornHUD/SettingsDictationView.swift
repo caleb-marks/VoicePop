@@ -85,12 +85,14 @@ struct SettingsDictationView: View {
 
     @ViewBuilder
     private func modelRow(_ choice: VoxtypeModel.Choice) -> some View {
+        let isCurrent = VoxtypeModel.matches(models.current, catalogID: choice.id)
+        let isInstalled = isCurrent || models.installed.contains { VoxtypeModel.matches($0, catalogID: choice.id) }
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(choice.title).fontWeight(models.current == choice.id ? .semibold : .regular)
-                    if models.current == choice.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                    else if models.installed.contains(choice.id) { Text("Installed").font(.caption).foregroundStyle(.secondary) }
+                    Text(choice.title).fontWeight(isCurrent ? .semibold : .regular)
+                    if isCurrent { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                    else if isInstalled { Text("Installed").font(.caption).foregroundStyle(.secondary) }
                 }
                 Text(choice.summary).font(.caption).foregroundStyle(.secondary)
                 Text(String(format: "~%.1f GB", choice.approxSizeGB)).font(.caption2).foregroundStyle(.tertiary)
@@ -100,10 +102,10 @@ struct SettingsDictationView: View {
                 }
             }
             Spacer()
-            Button(models.current == choice.id ? "Selected" : (models.installed.contains(choice.id) ? "Use" : "Download & Use")) {
+            Button(isCurrent ? "Selected" : (isInstalled ? "Use" : "Download & Use")) {
                 models.select(choice.id)
             }
-            .disabled(models.current == choice.id || models.downloadingID != nil)
+            .disabled(isCurrent || models.downloadingID != nil)
         }
         .padding(.vertical, 2)
     }
@@ -138,11 +140,14 @@ final class ModelListViewModel: ObservableObject {
 
     private var lastAttempted: String?
 
-    func select(_ id: String) {
-        guard downloadingID == nil, current != id else { return }
-        lastAttempted = id
+    func select(_ catalogID: String) {
+        guard downloadingID == nil, !VoxtypeModel.matches(current, catalogID: catalogID) else { return }
+        // Prefer the engine's own installed spelling (e.g. a "-prepacked" variant) so switching
+        // to an already-installed model never re-triggers a download under a different name.
+        let id = installed.first { VoxtypeModel.matches($0, catalogID: catalogID) } ?? catalogID
+        lastAttempted = catalogID
         failure = nil
-        let needsDownload = !installed.contains(id)
+        let needsDownload = !installed.contains { VoxtypeModel.matches($0, catalogID: catalogID) }
         if needsDownload {
             downloadingID = id
             downloadFraction = nil
