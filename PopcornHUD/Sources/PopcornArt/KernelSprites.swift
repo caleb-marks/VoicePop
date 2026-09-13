@@ -89,6 +89,18 @@ enum KernelSprites {
         return image
     }
 
+    /// Drop every cached sprite. Idle memory: 180 bodies + 12 shadows are ~6 MB of bitmaps that
+    /// only matter while the HUD is on screen. A cold cache still draws correctly (each miss paints
+    /// on demand and re-triggers a background prewarm), so this trades a few ms on the first frame
+    /// of the next recording for ~20% of the app's idle footprint. Safe from any thread.
+    static func purge() {
+        lock.lock()
+        bodies.removeAll()
+        shadows.removeAll()
+        prewarmed.removeAll()
+        lock.unlock()
+    }
+
     /// Paint every sprite for `density` (180 bodies and 12 shadows). Safe from any thread.
     static func prewarm(density: Int) {
         lock.lock()

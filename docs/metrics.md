@@ -1,6 +1,6 @@
 # VoicePop metrics
 
-> **Current default (since 2026-09-09):** NVIDIA Parakeet `parakeet-tdt-0.6b-v3-int8` on a local Voxtype 1.0.1 rebuild with `gpu-metal,parakeet,parakeet-coreml`. The engine may report the packaged variant `parakeet-tdt-0.6b-v3-int8-prepacked`; VoicePop treats it as the same model. Whisper `small.en` stays available as a fallback in **Settings → Dictation**.
+> **Current default (since 2026-09-09):** NVIDIA Parakeet `parakeet-tdt-0.6b-v3-int8` on a local Voxtype 1.0.1 rebuild with `gpu-metal,parakeet` (`parakeet-coreml` until 1.2.2). The engine may report the packaged variant `parakeet-tdt-0.6b-v3-int8-prepacked`; VoicePop treats it as the same model. Whisper `small.en` stays available as a fallback in **Settings → Dictation**.
 
 > **Low-memory model (since 2026-09-12):** `scripts/optimize-parakeet.sh` builds `parakeet-tdt-0.6b-v3-int8-prepacked`: the same int8 graph run through ONNX Runtime's offline optimizer with weights and prepacked kernels saved to mmapped `.data` sidecars, so they live in the file cache instead of the daemon's heap. Measured on the fixture set (40 utterances, identical transcripts): peak footprint **1836 MB → 122 MB**, load median 0.69 s → 0.49 s, CPU time −21%, transcribe median 70 ms → 80 ms. The live daemon on the reference machine shows a 129 MB peak footprint with this model. Prepacked blobs are tied to the ONNX Runtime version, so re-run the script after rebuilding Voxtype against a different ORT. VoicePop treats the variant as Parakeet via `ModelIdentity`; no app code depends on the script.
 

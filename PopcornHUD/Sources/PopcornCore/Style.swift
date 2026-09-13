@@ -114,6 +114,25 @@ public struct LearningPrefs: Codable, Equatable, Sendable {
     }
 }
 
+/// What VoicePop is allowed to keep on disk about dictations. Read fresh by `voxtype-clean` on
+/// every dictation (it loads `style.json` each run), so a change in Settings applies to the very
+/// next dictation with no restart.
+public struct PrivacyPrefs: Codable, Equatable, Sendable {
+    /// Whether each dictation is appended to `history.jsonl`. Off stops *new* writes only;
+    /// existing history stays until the user clears it explicitly. Corrections and learned words
+    /// are separate files and are not governed by this flag.
+    public var saveHistory = true
+
+    public init(saveHistory: Bool = true) {
+        self.saveHistory = saveHistory
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        saveHistory = try c.decodeIfPresent(Bool.self, forKey: .saveHistory) ?? true
+    }
+}
+
 public struct StylePrefs: Codable, Equatable, Sendable {
     public var version = 1
     public var global: Style = .auto
@@ -121,13 +140,14 @@ public struct StylePrefs: Codable, Equatable, Sendable {
     public var llm = LLMPrefs()
     public var learning = LearningPrefs()
     public var mascot: Mascot = .popcorn
+    public var privacy = PrivacyPrefs()
     /// Top-level keys this version of the app does not recognize. Round-tripped so hand edits or
     /// a newer app version's fields survive a save from here instead of being dropped.
     public var unknownFields: [String: JSONValue] = [:]
     public static let `default` = StylePrefs()
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case version, global, perApp, llm, learning, mascot
+        case version, global, perApp, llm, learning, mascot, privacy
     }
 
     public init() {}
@@ -152,6 +172,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
         }
         llm = try c.decodeIfPresent(LLMPrefs.self, forKey: .llm) ?? LLMPrefs()
         learning = try c.decodeIfPresent(LearningPrefs.self, forKey: .learning) ?? LearningPrefs()
+        privacy = try c.decodeIfPresent(PrivacyPrefs.self, forKey: .privacy) ?? PrivacyPrefs()
         if let raw = try c.decodeIfPresent(String.self, forKey: .mascot) {
             mascot = Mascot(rawValue: raw) ?? .popcorn
         } else {
@@ -169,6 +190,7 @@ public struct StylePrefs: Codable, Equatable, Sendable {
         try c.encode(llm, forKey: .llm)
         try c.encode(learning, forKey: .learning)
         try c.encode(mascot.rawValue, forKey: .mascot)
+        try c.encode(privacy, forKey: .privacy)
         try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 

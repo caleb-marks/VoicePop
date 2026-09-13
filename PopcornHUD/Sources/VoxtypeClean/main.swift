@@ -81,8 +81,11 @@ enum VoxtypeCleanMain {
         }
         FileHandle.standardOutput.write(payload)
         try? FileHandle.standardOutput.close()
-        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            HistoryStore.append(HistoryEntry(
+        // `HistoryStore.record` honours Settings → General → Privacy → "Save transcript history"
+        // from the same `style.json` read at the top of this run, so turning it off stops the
+        // very next dictation from being written by this separate process too.
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           HistoryStore.record(HistoryEntry(
                 ts: VoxtypeCleanMain.iso8601.string(from: Date()),
                 app: app,
                 style: style.rawValue,
@@ -90,7 +93,7 @@ enum VoxtypeCleanMain {
                 rules: rules,
                 out: out,
                 llm: usedLLM
-            ))
+           ), prefs: prefs) {
             if env["VOICEPOP_NO_SIGNAL"] != "1" {
                 CFNotificationCenterPostNotification(
                     CFNotificationCenterGetDarwinNotifyCenter(),

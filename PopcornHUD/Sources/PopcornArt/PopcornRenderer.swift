@@ -651,6 +651,11 @@ public enum PopcornRenderer {
         KernelSprites.prewarm(density: KernelSprites.density(displayScale: displayScale))
     }
 
+    /// Release the kernel sprite cache (see `KernelSprites.purge`). Call once the HUD has been idle.
+    public static func purgeKernelSprites() {
+        KernelSprites.purge()
+    }
+
     /// One kernel: a soft contact shadow, the pre-rendered body sprite (lobes, butter, folds),
     /// and a scene-space light gradient over the silhouette. The light is computed in scene
     /// space and counter-rotated into the kernel's frame, so a tumbling kernel keeps its highlight

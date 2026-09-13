@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${1:-${VOXTYPE_SOURCE:-$ROOT/.cache/voxtype-src}}"
 OUT="${2:-$ROOT/dist/release-engine}"
 PIN="dda37ca72b71294d08b0c5bb49c5b24ca590d847"
-FEATURES="gpu-metal,parakeet,parakeet-coreml"
+FEATURES="gpu-metal,parakeet"
 
 [[ -f "$SRC/Cargo.toml" && -f "$SRC/Cargo.lock" ]] \
   || { echo "ERROR: Voxtype source and lockfile not found at $SRC" >&2; exit 1; }

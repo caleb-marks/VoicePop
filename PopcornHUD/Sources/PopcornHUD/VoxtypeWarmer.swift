@@ -1,5 +1,4 @@
 import Foundation
-import PopcornCore
 
 final class VoxtypeWarmer {
     static let shared = VoxtypeWarmer()

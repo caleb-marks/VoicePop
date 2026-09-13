@@ -124,10 +124,6 @@ public struct OllamaClient {
         return (200...299).contains(response.statusCode)
     }
 
-    public func polish(text: String, glossary: [String], examples: [CorrectionEntry], budgetMs: Int? = nil) -> String? {
-        polishDetailed(text: text, glossary: glossary, examples: examples, budgetMs: budgetMs).text
-    }
-
     /// Bounded by `budgetMs` (or `timeoutMs`): a slow or missing model yields a non-`.polished`
     /// outcome in time for the caller to fall back to its rules output.
     public func polishDetailed(text: String, glossary: [String], examples: [CorrectionEntry], budgetMs: Int? = nil) -> PolishOutcome {
@@ -260,13 +256,6 @@ public struct OllamaClient {
         var data: Data?
         var response: HTTPURLResponse?
         var timedOut = false
-    }
-
-    static func send(_ request: URLRequest, timeoutMs: Int) -> (Data?, HTTPURLResponse?) {
-        if case .response(let data, let response) = sendDetailed(request, timeoutMs: timeoutMs) {
-            return (data, response)
-        }
-        return (nil, nil)
     }
 
     public static func sendDetailed(_ request: URLRequest, timeoutMs: Int) -> SendResult {

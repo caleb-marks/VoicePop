@@ -199,13 +199,11 @@ final class SetupChecklistWindowController: NSObject, NSWindowDelegate {
 
     let model = SetupChecklistModel()
     private var window: NSWindow?
-    private weak var health: DictationHealthMonitor?
     private var listening = false
     private var lastMenuRecordRequest: Date?
 
     /// Called once services exist, so daemon state can count as FN/permission evidence.
     func attach(health: DictationHealthMonitor) {
-        self.health = health
         model.health = health
         model.servicesStarted()
         guard !listening else { return }

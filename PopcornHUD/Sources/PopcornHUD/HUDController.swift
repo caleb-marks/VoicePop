@@ -44,6 +44,11 @@ final class HUDController {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     /// Rounded-up backing scales whose kernel sprites were already prewarmed (main thread).
     private var prewarmedScales: Set<Int> = []
+    /// Pending idle memory trim, armed by `beginHide` and cancelled by the next recording.
+    private var idleTrim: DispatchWorkItem?
+    /// How long the HUD stays hidden before its caches are released. Long enough that back-to-back
+    /// dictations never pay the re-paint; short enough that the memory goes back within a minute.
+    static let idleTrimDelay: TimeInterval = 30
     private var health: DictationHealthMonitor?
 
     // Recording session bookkeeping (main thread).
@@ -115,6 +120,8 @@ final class HUDController {
 
         buildPanel()
         prewarmSprites()
+        // The launch prewarm keeps the first dictation after login snappy; if none comes, release it.
+        scheduleIdleTrim()
         watcher.addListener { [weak self] state in
             self?.handleState(state)
         }
@@ -213,6 +220,9 @@ final class HUDController {
     }
 
     private func enterRecording() {
+        idleTrim?.cancel()
+        idleTrim = nil
+        prewarmSprites()
         mascot = StylePrefsCache.current().mascot
         presentation = .recording
         enterProgress = 0
@@ -294,6 +304,26 @@ final class HUDController {
         stopAnimation()
         detachHost()
         Timing.event("hud.hidden")
+        scheduleIdleTrim()
+    }
+
+    /// After `idleTrimDelay` hidden, drop the sprite cache and hand the allocator's free pages
+    /// back to the kernel. Idle memory only: nothing here runs while the HUD is visible, and the
+    /// next `enterRecording` cancels a pending trim and re-prewarms off main.
+    private func scheduleIdleTrim() {
+        idleTrim?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.presentation == .hidden else { return }
+            self.idleTrim = nil
+            self.prewarmedScales.removeAll()
+            let start = Timing.nowUs()
+            PopcornRenderer.purgeKernelSprites()
+            // Returns clean free pages in every malloc zone to the system; live allocations are untouched.
+            malloc_zone_pressure_relief(nil, 0)
+            Timing.event("hud.idletrim", ["ms": String((Timing.nowUs() - start) / 1000)])
+        }
+        idleTrim = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleTrimDelay, execute: item)
     }
 
     // MARK: - Animation clock

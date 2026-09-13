@@ -24,13 +24,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var globalStyleItems: [Style: NSMenuItem] = [:]
     private var appStyleItems: [String: NSMenuItem] = [:]   // keys "default", "casual", "formal"
     private var appHeaderItem: NSMenuItem?
-    private var cachedCurrentModel: String?
     private var refreshInFlight = false
     private var modelCacheStamp = Date.distantPast
     private static let modelCacheTTL: TimeInterval = 5
     private var modelShortTitle: String?
     private var fixLastMenuItem: NSMenuItem?
-    private var watcher: StateWatcher?
     private var health: DictationHealthMonitor?
     private var statusListenerToken: DictationHealthMonitor.ListenerToken?
     private var historyAppendedToken: DictationHealthMonitor.ListenerToken?
@@ -51,7 +49,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         item.menu = menu
         statusItem = item
 
-        self.watcher = watcher
         watcher.addListener { [weak self] state in
             self?.apply(state: state)
         }
@@ -94,7 +91,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let health, let historyAppendedToken { health.removeListener(historyAppendedToken) }
         statusListenerToken = nil
         historyAppendedToken = nil
-        watcher = nil
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
         }
@@ -384,7 +380,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let current = VoxtypeModel.currentModel()
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.cachedCurrentModel = current
                 self.modelShortTitle = current.map(VoxtypeModel.title(for:))
                 self.modelCacheStamp = Date()
                 self.refreshInFlight = false

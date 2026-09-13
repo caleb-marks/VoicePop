@@ -6,7 +6,6 @@
 # Produces:
 #   state-watcher-bench   polling baseline vs event-driven StateWatcher on an isolated fixture
 #   hud-publish-bench     NSHostingView<PopcornView> publication cost, offscreen
-#   timing-report         p50/p95 per pipeline interval from a VoicePop timing log
 #
 # Nothing here launches VoicePop, talks to the running Voxtype daemon, or reads ~/.config.
 set -euo pipefail
@@ -34,9 +33,5 @@ swiftc "${flags[@]}" -parse-as-library -I "$out" -L "$out" -lPopcornCore \
 echo "building hud-publish-bench…"
 swiftc "${flags[@]}" -parse-as-library -I "$out" -L "$out" -lPopcornCore -lPopcornArt \
   "$here/HUDPublishBench.swift" "$pkg/Sources/PopcornHUD/PopcornView.swift" -o "$out/hud-publish-bench"
-
-echo "building timing-report…"
-swiftc "${flags[@]}" -parse-as-library -I "$out" -L "$out" -lPopcornCore \
-  "$here/TimingReportMain.swift" -o "$out/timing-report"
 
 echo "done: $out"

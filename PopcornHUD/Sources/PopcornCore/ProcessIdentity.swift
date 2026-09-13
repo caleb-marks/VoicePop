@@ -45,11 +45,4 @@ public enum ProcessIdentity {
         guard count > 0 else { return [] }
         return Array(pids.prefix(Int(count))).filter { $0 > 1 }
     }
-
-    /// True when `pid` is alive and runs exactly `executablePath` (symlinks resolved).
-    public static func isRunning(pid: Int32, executablePath: String) -> Bool {
-        guard pid > 1, kill(pid, 0) == 0, let actual = self.executablePath(pid: pid) else { return false }
-        let expected = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath().path
-        return URL(fileURLWithPath: actual).resolvingSymlinksInPath().path == expected
-    }
 }

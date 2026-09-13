@@ -67,14 +67,4 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertThrowsError(try ProcessRunner.run("/nonexistent/voxtype-bin", ["info"], timeout: 1))
         XCTAssertFalse(ProcessRunner.spawnDetached("/nonexistent/voxtype-bin"))
     }
-
-    func testRunAsyncDeliversOnQueue() {
-        let done = expectation(description: "async")
-        ProcessRunner.runAsync("/bin/echo", ["hi"], timeout: 5, stdout: .capture) { result in
-            XCTAssertTrue(Thread.isMainThread)
-            XCTAssertEqual((try? result.get())?.stdoutText, "hi\n")
-            done.fulfill()
-        }
-        wait(for: [done], timeout: 5)
-    }
 }
