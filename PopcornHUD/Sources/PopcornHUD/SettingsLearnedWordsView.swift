@@ -187,12 +187,26 @@ struct SettingsLearnedWordsView: View {
 final class LearnedWordsViewModel: ObservableObject {
     enum LoadState { case ready, malformed }
 
+    /// A user edit, replayed against a freshly re-read copy of the file at save time (M-1) -
+    /// never against whatever this view model loaded when the tab first appeared. That is what
+    /// lets a save merge with entries the correction window learned in the meantime instead of
+    /// silently erasing them, and refuse instead of overwriting a file that became malformed
+    /// after this tab's own load.
+    private enum Mutation {
+        case add(Replacement)
+        case update(originalFrom: String, from: String, to: String)
+        case delete(from: String)
+    }
+
     @Published var entries: [Replacement] = []
     @Published var loadState: LoadState = .ready
     @Published var saveError: String?
     @Published var quarantineError: String?
 
+    /// Only for validation feedback in the UI and for `filtered`/row display between saves - the
+    /// save path itself always re-reads the file (see `Mutation`).
     private var replacements = Replacements()
+    private var lastMutation: Mutation?
 
     func load() {
         switch Replacements.inspect() {
@@ -217,13 +231,8 @@ final class LearnedWordsViewModel: ObservableObject {
     /// fails (e.g. permissions), stay in the malformed state and surface why, rather than
     /// presenting an empty "ready" list that would then overwrite the still-broken file.
     func quarantineAndStartFresh() {
-        let bad = VoicePopPaths.replacements.appendingPathExtension("bad")
         do {
-            if FileManager.default.fileExists(atPath: bad.path) {
-                try FileManager.default.removeItem(at: bad)
-            }
-            try FileManager.default.moveItem(at: VoicePopPaths.replacements, to: bad)
-            try? VoicePopPaths.secureFile(bad)
+            try VoicePopPaths.quarantine(VoicePopPaths.replacements)
         } catch {
             quarantineError = "Couldn\u{2019}t move replacements.json aside. \(error.localizedDescription)"
             return
@@ -236,18 +245,23 @@ final class LearnedWordsViewModel: ObservableObject {
 
     @discardableResult
     func add(from: String, to: String) -> ReplacementValidationError? {
-        if let error = Replacements.validate(from: from, to: to, existing: replacements.entries) {
+        // Manual entries are normalized the same way learned ones are (L-12): otherwise "Teh" and
+        // a later correction-learned "teh" become case-duplicate entries that `apply` treats
+        // differently (it matches keys case-insensitively but only stores one canonical `from`).
+        let key = DiffLearner.key(from)
+        if let error = Replacements.validate(from: key, to: to, existing: replacements.entries) {
             return error
         }
+        let minCount = StylePrefsCache.current().learning.minCount
         let entry = Replacement(
-            from: from.trimmingCharacters(in: .whitespacesAndNewlines),
+            from: key,
             to: to.trimmingCharacters(in: .whitespacesAndNewlines),
-            count: 1,
+            count: max(1, minCount),
             lastTs: ISO8601DateFormatter().string(from: Date())
         )
         replacements.entries.append(entry)
         entries = replacements.entries
-        persist()
+        persistMutation(.add(entry))
         return nil
     }
 
@@ -255,39 +269,74 @@ final class LearnedWordsViewModel: ObservableObject {
     /// edited never flags itself as a duplicate of its own prior key.
     @discardableResult
     func update(original: Replacement, from: String, to: String) -> ReplacementValidationError? {
-        if let error = Replacements.validate(from: from, to: to, existing: replacements.entries, excluding: original.from) {
+        let key = DiffLearner.key(from)
+        if let error = Replacements.validate(from: key, to: to, existing: replacements.entries, excluding: original.from) {
             return error
         }
         guard let idx = replacements.entries.firstIndex(where: { $0.from == original.from }) else { return nil }
-        replacements.entries[idx].from = from.trimmingCharacters(in: .whitespacesAndNewlines)
+        replacements.entries[idx].from = key
         replacements.entries[idx].to = to.trimmingCharacters(in: .whitespacesAndNewlines)
         entries = replacements.entries
-        persist()
+        persistMutation(.update(originalFrom: original.from, from: key, to: to))
         return nil
     }
 
     func delete(_ entry: Replacement) {
         replacements.entries.removeAll { $0.from == entry.from }
         entries = replacements.entries
-        persist()
+        persistMutation(.delete(from: entry.from))
     }
 
-    /// Re-attempts writing whatever the current in-memory state already is. Must not re-run
-    /// add/update/delete: those already mutated `replacements`, so re-running them would
-    /// re-validate against the post-mutation state and (for `add`) fail as a duplicate of the
-    /// entry it just added, silently swallowing the retry.
+    /// Re-attempts the same edit, re-read against the file's current state (which may have
+    /// changed since the last attempt).
     func retrySave() {
-        persist()
+        guard let lastMutation else { return }
+        persistMutation(lastMutation)
     }
 
-    /// Saves, and on failure keeps the in-memory edit (already applied to `entries` by the
-    /// caller) so the UI never discards what the user typed - only Retry re-attempts the write.
-    private func persist() {
+    /// Re-inspects the file, refuses (with an error, keeping the in-UI edit) if it is missing-then
+    /// -corrupted or corrupt, otherwise replays `mutation` on top of whatever is actually on disk
+    /// right now and saves that - never the possibly-stale copy this view model loaded earlier.
+    private func persistMutation(_ mutation: Mutation) {
+        lastMutation = mutation
+        var fresh: Replacements
+        switch Replacements.inspect() {
+        case .corrupt:
+            saveError = "replacements.json can\u{2019}t be read (it changed since Learned Words opened). Close and reopen Learned Words to see the Reveal in Finder / Move Aside options; your edit here is unsaved."
+            return
+        case .missing:
+            fresh = Replacements()
+        case .ready(let r):
+            fresh = r
+        }
+        apply(mutation, to: &fresh)
         do {
-            try replacements.save()
+            try fresh.save()
+            replacements = fresh
+            entries = fresh.entries
             saveError = nil
         } catch {
             saveError = "Couldn\u{2019}t save learned words. \(error.localizedDescription)"
+        }
+    }
+
+    private func apply(_ mutation: Mutation, to r: inout Replacements) {
+        switch mutation {
+        case .add(let entry):
+            if let idx = r.entries.firstIndex(where: { $0.from == entry.from }) {
+                r.entries[idx] = entry
+            } else {
+                r.entries.append(entry)
+            }
+        case .update(let originalFrom, let from, let to):
+            if let idx = r.entries.firstIndex(where: { $0.from == originalFrom }) {
+                r.entries[idx].from = from
+                r.entries[idx].to = to
+            } else {
+                r.entries.append(Replacement(from: from, to: to, count: 1, lastTs: ISO8601DateFormatter().string(from: Date())))
+            }
+        case .delete(let from):
+            r.entries.removeAll { $0.from == from }
         }
     }
 }

@@ -151,6 +151,17 @@ public enum LastHistoryEntryCache {
             if let completion { DispatchQueue.main.async { completion(result) } }
         }
     }
+
+    /// Synchronously marks the cache empty-and-loaded. Call right after `HistoryStore.clear()`
+    /// succeeds (L-3): the caller already knows for a fact there is nothing left, so this is pure
+    /// bookkeeping, not a disk read, and is safe on the main thread.
+    public static func clear() {
+        lock.lock()
+        generation &+= 1
+        cached = nil
+        loaded = true
+        lock.unlock()
+    }
 }
 
 /// Reads only the tail of a growing JSONL file. A partial first line is dropped, which is
@@ -242,11 +253,7 @@ public struct Replacement: Codable, Equatable {
         self.to = try c.decode(String.self, forKey: .to)
         self.count = try c.decode(Int.self, forKey: .count)
         self.lastTs = try c.decode(String.self, forKey: .lastTs)
-        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
-            var extra = all
-            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
-            unknownFields = extra
-        }
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -255,19 +262,7 @@ public struct Replacement: Codable, Equatable {
         try c.encode(to, forKey: .to)
         try c.encode(count, forKey: .count)
         try c.encode(lastTs, forKey: .lastTs)
-        if !unknownFields.isEmpty {
-            struct ExtraKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int? { nil }
-                init?(intValue: Int) { nil }
-            }
-            var extra = encoder.container(keyedBy: ExtraKey.self)
-            for (key, value) in unknownFields {
-                guard let codingKey = ExtraKey(stringValue: key) else { continue }
-                try extra.encode(value, forKey: codingKey)
-            }
-        }
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 }
 
@@ -306,30 +301,14 @@ public struct Replacements: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         entries = try c.decodeIfPresent([Replacement].self, forKey: .entries) ?? []
-        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
-            var extra = all
-            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
-            unknownFields = extra
-        }
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(version, forKey: .version)
         try c.encode(entries, forKey: .entries)
-        if !unknownFields.isEmpty {
-            struct ExtraKey: CodingKey {
-                var stringValue: String
-                init?(stringValue: String) { self.stringValue = stringValue }
-                var intValue: Int? { nil }
-                init?(intValue: Int) { nil }
-            }
-            var extra = encoder.container(keyedBy: ExtraKey.self)
-            for (key, value) in unknownFields {
-                guard let codingKey = ExtraKey(stringValue: key) else { continue }
-                try extra.encode(value, forKey: codingKey)
-            }
-        }
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
     }
 
     /// Validates a Learned Words edit against the same rules `apply` uses at runtime, so an entry
@@ -554,6 +533,7 @@ public final class CorrectionSaver {
     public enum SaveError: Error, LocalizedError, Equatable {
         case correctionAppendFailed(String)
         case replacementsCorrupt
+        case replacementsQuarantineFailed(String)
         case replacementsSaveFailed(String)
 
         public var errorDescription: String? {
@@ -561,7 +541,9 @@ public final class CorrectionSaver {
             case .correctionAppendFailed(let detail):
                 return "Couldn't save the correction. \(detail)"
             case .replacementsCorrupt:
-                return "replacements.json can't be read. It was moved aside to replacements.json.bad so it isn't overwritten; a fresh file will be created."
+                return "replacements.json can't be read. It was moved aside so it isn't overwritten; a fresh file will be created."
+            case .replacementsQuarantineFailed(let detail):
+                return "replacements.json can't be read, and moving it aside also failed (\(detail)). It was not changed."
             case .replacementsSaveFailed(let detail):
                 return "Couldn't save learned words. \(detail)"
             }
@@ -607,7 +589,11 @@ public final class CorrectionSaver {
 
         switch Replacements.inspect(from: replacementsURL) {
         case .corrupt:
-            Self.quarantine(replacementsURL)
+            do {
+                try VoicePopPaths.quarantine(replacementsURL)
+            } catch {
+                throw SaveError.replacementsQuarantineFailed(error.localizedDescription)
+            }
             throw SaveError.replacementsCorrupt
         case .missing:
             var r = Replacements()
@@ -618,11 +604,5 @@ public final class CorrectionSaver {
             do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
         }
         return true
-    }
-
-    private static func quarantine(_ url: URL) {
-        let bad = url.appendingPathExtension("bad")
-        try? FileManager.default.removeItem(at: bad)
-        try? FileManager.default.moveItem(at: url, to: bad)
     }
 }

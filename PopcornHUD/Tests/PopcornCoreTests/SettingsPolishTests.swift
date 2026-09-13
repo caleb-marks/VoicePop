@@ -126,9 +126,12 @@ final class SettingsPolishTests: XCTestCase {
             XCTAssertEqual(error as? CorrectionSaver.SaveError, .replacementsCorrupt)
         }
         XCTAssertEqual(CorrectionStore.recent(limit: 10, from: correctionsURL).count, 1)
-        // Corrupt file must be quarantined, not left in place or overwritten.
+        // Corrupt file must be quarantined (to a timestamped .bad-<time> name - L-13), not left
+        // in place or overwritten.
         XCTAssertFalse(FileManager.default.fileExists(atPath: replacementsURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: replacementsURL.appendingPathExtension("bad").path))
+        let quarantined = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("replacements.json.bad-") }
+        XCTAssertEqual(quarantined.count, 1)
 
         // Retry after the quarantine (as the UI would, once the user has been told to Retry):
         // the correction record must not be duplicated even though save() runs again.

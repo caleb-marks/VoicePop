@@ -49,25 +49,12 @@ enum VoxtypeModel {
 
     static let nameGlossary = "VoicePop, Voxtype, Ghostty, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
 
-    /// Packaging suffixes the engine may report on an installed/active model id that the catalog
-    /// doesn't spell out (e.g. the live engine reports `parakeet-tdt-0.6b-v3-int8-prepacked` for
-    /// the catalog's `parakeet-tdt-0.6b-v3-int8`). Stripped before comparing ids so the Settings
-    /// UI still recognizes the variant as the same catalog choice.
-    private static let packagingSuffixes = ["-prepacked"]
-
-    static func normalizedID(_ id: String) -> String {
-        var normalized = id
-        for suffix in packagingSuffixes where normalized.hasSuffix(suffix) {
-            normalized.removeLast(suffix.count)
-        }
-        return normalized
-    }
-
     /// True when `id` (an installed/current model name from the engine, possibly with a
-    /// packaging suffix) refers to the same model as `catalogID`.
+    /// packaging suffix such as `-prepacked`) refers to the same model as `catalogID`. One
+    /// definition, shared with health probes and setup: `PopcornCore.ModelIdentity`.
     static func matches(_ id: String?, catalogID: String) -> Bool {
         guard let id else { return false }
-        return id == catalogID || normalizedID(id) == normalizedID(catalogID)
+        return ModelIdentity.same(id, catalogID)
     }
 
     static func title(for id: String) -> String {
@@ -96,16 +83,10 @@ enum VoxtypeModel {
         return Set(info.engines.values.flatMap { $0.models.filter(\.installed).map(\.name) })
     }
 
-    static func download(_ name: String) throws {
-        _ = try run([
-            "setup", "--download", "--model", name,
-            "--progress-format", "json", "--quiet",
-        ])
-    }
-
-    /// Same download, but streams parsed progress events as they arrive instead of waiting for
-    /// completion. Line parsing itself lives in `PopcornCore.ModelDownloadProgress`, which is
-    /// unit-tested against fixture lines.
+    /// Streams parsed download progress events as they arrive. Line parsing lives in
+    /// `PopcornCore.ModelDownloadProgress`, unit-tested against fixture lines. Drains stderr (to
+    /// avoid the child blocking on a full pipe - L-5) and keeps the last parsed JSON error, which
+    /// is more specific than a bare exit status.
     static func streamDownload(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             throw Failure(message: "Voxtype is not installed at \(bin)")
@@ -114,9 +95,12 @@ enum VoxtypeModel {
         task.executableURL = URL(fileURLWithPath: bin)
         task.arguments = ["setup", "--download", "--model", name, "--progress-format", "json", "--quiet"]
         let outPipe = Pipe()
+        let errPipe = Pipe()
         task.standardOutput = outPipe
-        task.standardError = Pipe()
+        task.standardError = errPipe
         var buffer = Data()
+        let lastErrorLock = NSLock()
+        var lastError: String?
         outPipe.fileHandleForReading.readabilityHandler = { handle in
             buffer.append(handle.availableData)
             while let range = buffer.range(of: Data([0x0A])) {
@@ -124,8 +108,18 @@ enum VoxtypeModel {
                 buffer.removeSubrange(buffer.startIndex..<range.upperBound)
                 guard let line = String(data: lineData, encoding: .utf8),
                       let event = ModelDownloadProgress.parse(line: line) else { continue }
+                if case .failure(let message) = event {
+                    lastErrorLock.lock(); lastError = message; lastErrorLock.unlock()
+                }
                 onEvent(event)
             }
+        }
+        // Drain stderr on its own queue so a chatty child never blocks on a full pipe.
+        let errGroup = DispatchGroup()
+        errGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            _ = errPipe.fileHandleForReading.readDataToEndOfFile()
+            errGroup.leave()
         }
         do {
             try task.run()
@@ -135,8 +129,10 @@ enum VoxtypeModel {
         }
         task.waitUntilExit()
         outPipe.fileHandleForReading.readabilityHandler = nil
+        errGroup.wait()
         if task.terminationStatus != 0 {
-            throw Failure(message: "Model download failed (\(task.terminationStatus)).")
+            lastErrorLock.lock(); let detail = lastError; lastErrorLock.unlock()
+            throw Failure(message: detail ?? "Model download failed (\(task.terminationStatus)).")
         }
     }
 
