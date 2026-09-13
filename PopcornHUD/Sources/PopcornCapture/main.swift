@@ -197,11 +197,11 @@ struct PopcornCapture {
     static let capsuleHUDScale = 0.65
 
     /// Recording → transcribing, driven like `HUDController`: spawning stops, `bagVisible` eases
-    /// from 1 to 0 over `Tunables.collapseMs`, and the window scale eases from 1 to 0.65.
+    /// from 1 to 0 over `Tunables.collapseMs(for:)`, and the window scale eases from 1 to 0.65.
     static func collapse(sim: PopcornSim, mono: inout UInt64, mascot: Mascot) -> [(PopcornRenderer.SceneInput, Double)] {
         sim.allowSpawn = false
         var out: [(PopcornRenderer.SceneInput, Double)] = []
-        let frames = max(1, Int((Tunables.collapseMs / 1000 * 60).rounded(.up)))
+        let frames = max(1, Int((Tunables.collapseMs(for: mascot) / 1000 * 60).rounded(.up)))
         for f in 1...frames {
             mono += 16
             let t = min(1, Double(f) / Double(frames))
@@ -379,7 +379,7 @@ private struct KernelSheet: View {
                 let x = 50 + CGFloat(shape) * 80
                 PopcornRenderer.drawKernel(
                     ctx: &ctx, at: CGPoint(x: x, y: 70),
-                    scale: 1.6, shape: shape, butter: 0.10 + CGFloat(shape) * 0.055, alpha: 1, rot: 0, heat: 0
+                    scale: 1.6, shape: shape, butter: 0.10 + CGFloat(shape) * 0.055, alpha: 1, rot: 0
                 )
             }
             // Dark band with shapes 6–11
@@ -389,7 +389,7 @@ private struct KernelSheet: View {
                 let x = 50 + CGFloat(col) * 80
                 PopcornRenderer.drawKernel(
                     ctx: &ctx, at: CGPoint(x: x, y: 210),
-                    scale: 1.6, shape: shape, butter: 0.36 - CGFloat(col) * 0.055, alpha: 1, rot: 0.15, heat: 0
+                    scale: 1.6, shape: shape, butter: 0.36 - CGFloat(col) * 0.055, alpha: 1, rot: 0.15
                 )
             }
         }

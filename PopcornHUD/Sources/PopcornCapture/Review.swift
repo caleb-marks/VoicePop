@@ -54,6 +54,21 @@ enum Review {
                 PopcornCapture.save(img, to: "\(outDir)/kernel-rotation-\(Int(scale))x.png")
             }
         }
+        // Cleanup fade: one kernel at alpha 1, 0.75, 0.5, 0.25 over black and white at 4×.
+        let fade = Canvas { ctx, size in
+            ctx.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: size.height / 2)), with: .color(.black))
+            ctx.fill(Path(CGRect(x: 0, y: size.height / 2, width: size.width, height: size.height / 2)), with: .color(.white))
+            for (i, alpha) in [1.0, 0.75, 0.5, 0.25].enumerated() {
+                for row in 0..<2 {
+                    PopcornRenderer.drawKernel(ctx: &ctx, at: CGPoint(x: 20 + CGFloat(i) * 36, y: 20 + CGFloat(row) * 40),
+                                               scale: 1, shape: 7, butter: 0.3, alpha: alpha, rot: 0.4)
+                }
+            }
+        }
+        .frame(width: 148, height: 80)
+        let fadeRenderer = ImageRenderer(content: fade)
+        fadeRenderer.scale = 4
+        if let img = fadeRenderer.nsImage { PopcornCapture.save(img, to: "\(outDir)/kernel-fade-4x.png") }
         print("wrote review stills to \(outDir)")
     }
 }

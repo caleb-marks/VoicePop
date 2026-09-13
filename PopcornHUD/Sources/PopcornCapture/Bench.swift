@@ -263,7 +263,7 @@ enum Bench {
                     at: CGPoint(x: rng.next(in: 20...240), y: rng.next(in: 20...400)),
                     scale: CGFloat(rng.next(in: 0.72...1.08)), shape: i,
                     butter: CGFloat(rng.next(in: 0.06...0.4)), alpha: 1,
-                    rot: CGFloat(rng.next(in: 0...6.28)), heat: 0.8, airborne: airborne
+                    rot: CGFloat(rng.next(in: 0...6.28)), airborne: airborne
                 )
             }
         }

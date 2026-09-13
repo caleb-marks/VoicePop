@@ -104,7 +104,7 @@ public enum PopcornRenderer {
     }
 
     /// Below this `bagVisible` the collapsing popcorn tub is fully gone. Lower than the legacy
-    /// 0.15 switch point so the fade covers most of `Tunables.collapseMs` instead of its first third.
+    /// 0.15 switch point so the fade covers most of `Tunables.popcornCollapseMs` instead of its first third.
     private static let popcornCollapseFloor = 0.04
 
     public static func drawScene(ctx: inout GraphicsContext, scene: SceneInput) {
@@ -332,7 +332,7 @@ public enum PopcornRenderer {
                 ctx: &ctx,
                 at: CGPoint(x: k.x, y: k.y),
                 scale: k.scale, shape: k.shape, butter: k.butter,
-                alpha: k.alpha, rot: k.rot, heat: scene.heat
+                alpha: k.alpha, rot: k.rot
             )
         }
 
@@ -359,7 +359,7 @@ public enum PopcornRenderer {
             ctx: &ctx,
             at: CGPoint(x: cx + piece.dx + CGFloat(pose.dx), y: bagTop + piece.dy + CGFloat(pose.dy)),
             scale: piece.s, shape: piece.shape, butter: piece.butter,
-            alpha: 1, rot: piece.rot + CGFloat(pose.rot), heat: scene.heat
+            alpha: 1, rot: piece.rot + CGFloat(pose.rot)
         )
     }
 
@@ -469,7 +469,7 @@ public enum PopcornRenderer {
                 ctx: &ctx,
                 at: CGPoint(x: k.x, y: k.y),
                 scale: k.scale, shape: k.shape, butter: k.butter,
-                alpha: k.alpha, rot: k.rot, heat: scene.heat, airborne: true
+                alpha: k.alpha, rot: k.rot, airborne: true
             )
         }
     }
@@ -638,7 +638,6 @@ public enum PopcornRenderer {
         butter: CGFloat,
         alpha: Double,
         rot: CGFloat,
-        heat: Double = 0,
         airborne: Bool = false
     ) {
         guard alpha > 0 else { return }
@@ -650,13 +649,9 @@ public enum PopcornRenderer {
         let e = KernelSprites.extent
         let unitRect = CGRect(x: -e, y: -e, width: e * 2, height: e * 2)
         let si = KernelShapeCache.index(shape)
-        _ = heat
-
-        var c = ctx
-        if alpha < 1 { c.opacity *= alpha }
 
         if !fading {
-            var shadow = c
+            var shadow = ctx
             shadow.translateBy(x: at.x + 0.55, y: at.y + (airborne ? 1.1 : 1.35))
             shadow.rotate(by: .radians(Double(rot)))
             shadow.scaleBy(x: r, y: r)
@@ -664,19 +659,32 @@ public enum PopcornRenderer {
             shadow.draw(KernelSprites.shadow(shape: si, density: density), in: unitRect)
         }
 
-        c.translateBy(x: at.x, y: at.y)
-        c.rotate(by: .radians(Double(rot)))
-        c.scaleBy(x: r, y: r)
-        c.draw(KernelSprites.body(shape: si, butter: butter, density: density), in: unitRect)
-
         let cosR = CGFloat(cos(Double(-rot)))
         let sinR = CGFloat(sin(Double(-rot)))
         func local(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
             CGPoint(x: x * cosR - y * sinR, y: x * sinR + y * cosR)
         }
-        c.fill(
-            KernelShapeCache.outline[si],
-            with: .linearGradient(PaletteUI.kernelLight, startPoint: local(-0.75, -0.95), endPoint: local(0.45, 0.95))
-        )
+        func paint(_ c: inout GraphicsContext) {
+            c.translateBy(x: at.x, y: at.y)
+            c.rotate(by: .radians(Double(rot)))
+            c.scaleBy(x: r, y: r)
+            c.draw(KernelSprites.body(shape: si, butter: butter, density: density), in: unitRect)
+            c.fill(
+                KernelShapeCache.outline[si],
+                with: .linearGradient(PaletteUI.kernelLight, startPoint: local(-0.75, -0.95), endPoint: local(0.45, 0.95))
+            )
+        }
+
+        if fading {
+            // One layer so the body and its light fade as a unit instead of double-blending. Only
+            // the few kernels in their final 120 ms pay for the transparency layer.
+            ctx.drawLayer { layer in
+                layer.opacity = alpha
+                paint(&layer)
+            }
+        } else {
+            var c = ctx
+            paint(&c)
+        }
     }
 }

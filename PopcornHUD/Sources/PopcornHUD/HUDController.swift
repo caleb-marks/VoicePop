@@ -453,7 +453,7 @@ final class HUDController {
             }
         } else if presentation == .transcribing {
             if collapseProgress < 1 {
-                collapseProgress = min(1, collapseProgress + wallDt / (Tunables.collapseMs / 1000))
+                collapseProgress = min(1, collapseProgress + wallDt / (Tunables.collapseMs(for: mascot) / 1000)) // polish-shared: WS1 per-mascot collapse duration
                 let c = easeOut(collapseProgress)
                 sim.setBagVisible(1 - c)
                 opacity = 1
