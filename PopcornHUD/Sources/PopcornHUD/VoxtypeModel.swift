@@ -4,13 +4,13 @@ import PopcornCore
 /// A live install path a test can swap for a fixture-driven one, so the Settings Dictation tab's
 /// download/switch UI can be exercised without ever spawning `voxtype-bin` or touching the
 /// network (the polish worktree must not download models or `config set` for real).
-protocol ModelInstallRunning {
-    func download(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws
+protocol ModelInstallRunning: Sendable {
+    func download(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws
     func setModel(_ name: String) throws
 }
 
 struct LiveModelInstallRunner: ModelInstallRunning {
-    func download(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws {
+    func download(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         try VoxtypeModel.streamDownload(name, onEvent: onEvent)
     }
     func setModel(_ name: String) throws {
@@ -106,7 +106,7 @@ enum VoxtypeModel {
     /// Same download, but streams parsed progress events as they arrive instead of waiting for
     /// completion. Line parsing itself lives in `PopcornCore.ModelDownloadProgress`, which is
     /// unit-tested against fixture lines.
-    static func streamDownload(_ name: String, onEvent: @escaping (ModelDownloadEvent) -> Void) throws {
+    static func streamDownload(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             throw Failure(message: "Voxtype is not installed at \(bin)")
         }
