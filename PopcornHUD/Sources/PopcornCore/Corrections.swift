@@ -136,17 +136,23 @@ public struct CorrectionEntry: Codable, Equatable {
 public enum CorrectionStore {
     public static func append(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) {
         do {
-            try VoicePopPaths.ensureDir()
-            try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
-            let data = try JSONEncoder().encode(e) + Data("\n".utf8)
-            let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-            guard fd >= 0 else { throw AppendError.openFailed(errno) }
-            defer { close(fd) }
-            guard fchmod(fd, 0o600) == 0 else { throw AppendError.writeFailed(errno) }
-            try appendAll(fd: fd, data: data)
+            try appendThrowing(e, to: url)
         } catch {
             fputs("VoicePop: corrections append failed: \(error)\n", stderr)
         }
+    }
+
+    /// Throwing sibling of `append`, for callers (the correction window) that must show the user
+    /// an actionable error instead of silently swallowing it.
+    public static func appendThrowing(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) throws {
+        try VoicePopPaths.ensureDir()
+        try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
+        let data = try JSONEncoder().encode(e) + Data("\n".utf8)
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { throw AppendError.openFailed(errno) }
+        defer { close(fd) }
+        guard fchmod(fd, 0o600) == 0 else { throw AppendError.writeFailed(errno) }
+        try appendAll(fd: fd, data: data)
     }
 
     public static func recent(limit: Int, from url: URL = VoicePopPaths.corrections) -> [CorrectionEntry] {
@@ -163,12 +169,69 @@ public struct Replacement: Codable, Equatable {
     public var to: String
     public var count: Int
     public var lastTs: String
+    /// Per-entry keys this version does not recognize, preserved on save.
+    public var unknownFields: [String: JSONValue] = [:]
 
     public init(from: String, to: String, count: Int, lastTs: String) {
         self.from = from
         self.to = to
         self.count = count
         self.lastTs = lastTs
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case from, to, count, lastTs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.from = try c.decode(String.self, forKey: .from)
+        self.to = try c.decode(String.self, forKey: .to)
+        self.count = try c.decode(Int.self, forKey: .count)
+        self.lastTs = try c.decode(String.self, forKey: .lastTs)
+        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
+            var extra = all
+            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
+            unknownFields = extra
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(from, forKey: .from)
+        try c.encode(to, forKey: .to)
+        try c.encode(count, forKey: .count)
+        try c.encode(lastTs, forKey: .lastTs)
+        if !unknownFields.isEmpty {
+            struct ExtraKey: CodingKey {
+                var stringValue: String
+                init?(stringValue: String) { self.stringValue = stringValue }
+                var intValue: Int? { nil }
+                init?(intValue: Int) { nil }
+            }
+            var extra = encoder.container(keyedBy: ExtraKey.self)
+            for (key, value) in unknownFields {
+                guard let codingKey = ExtraKey(stringValue: key) else { continue }
+                try extra.encode(value, forKey: codingKey)
+            }
+        }
+    }
+}
+
+/// Validation error for a Learned Words edit, surfaced verbatim in the Settings UI.
+public enum ReplacementValidationError: Error, LocalizedError, Equatable {
+    case fromTooShort
+    case toEmpty
+    case fromEqualsTo
+    case duplicateFrom
+
+    public var errorDescription: String? {
+        switch self {
+        case .fromTooShort: return "The original word or phrase must be at least 2 characters."
+        case .toEmpty: return "The replacement text can't be empty."
+        case .fromEqualsTo: return "The replacement must be different from the original."
+        case .duplicateFrom: return "That word or phrase is already learned. Edit the existing entry instead."
+        }
     }
 }
 
@@ -177,8 +240,61 @@ public struct Replacements: Codable, Equatable {
 
     public var version = 1
     public var entries: [Replacement] = []
+    /// Top-level keys this version does not recognize, preserved on save.
+    public var unknownFields: [String: JSONValue] = [:]
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case version, entries
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        entries = try c.decodeIfPresent([Replacement].self, forKey: .entries) ?? []
+        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
+            var extra = all
+            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
+            unknownFields = extra
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(entries, forKey: .entries)
+        if !unknownFields.isEmpty {
+            struct ExtraKey: CodingKey {
+                var stringValue: String
+                init?(stringValue: String) { self.stringValue = stringValue }
+                var intValue: Int? { nil }
+                init?(intValue: Int) { nil }
+            }
+            var extra = encoder.container(keyedBy: ExtraKey.self)
+            for (key, value) in unknownFields {
+                guard let codingKey = ExtraKey(stringValue: key) else { continue }
+                try extra.encode(value, forKey: codingKey)
+            }
+        }
+    }
+
+    /// Validates a Learned Words edit against the same rules `apply` uses at runtime, so an entry
+    /// that would be silently ineffective is instead rejected in the UI. `excluding` is the
+    /// existing entry's `from` key when editing in place (so it isn't flagged as its own duplicate).
+    public static func validate(from: String, to: String, existing: [Replacement], excluding: String? = nil) -> ReplacementValidationError? {
+        let trimmedFrom = from.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTo = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedFrom.count >= 2 else { return .fromTooShort }
+        guard !trimmedTo.isEmpty else { return .toEmpty }
+        guard trimmedFrom.caseInsensitiveCompare(trimmedTo) != .orderedSame else { return .fromEqualsTo }
+        let key = DiffLearner.key(trimmedFrom)
+        for e in existing {
+            if let excluding, DiffLearner.key(excluding) == key { continue }
+            if DiffLearner.key(e.from) == key { return .duplicateFrom }
+        }
+        return nil
+    }
 
     public enum LoadResult: Equatable {
         case missing
@@ -373,5 +489,87 @@ public enum DiffLearner {
         }
         emit(from: typed[ti...], to: corrected[ci...])
         return result
+    }
+}
+
+/// Testable save logic for the correction window (§4): appends a `corrections.jsonl` record and
+/// learns replacements from an edited transcript. Injectable URLs so tests never touch real
+/// config. One instance per open correction window: it remembers which (entry, edited-text) pair
+/// it already appended, so retrying after a failure never writes a duplicate `corrections.jsonl`
+/// record even though `learn`/`save` may be retried.
+public final class CorrectionSaver {
+    public enum SaveError: Error, LocalizedError, Equatable {
+        case correctionAppendFailed(String)
+        case replacementsCorrupt
+        case replacementsSaveFailed(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .correctionAppendFailed(let detail):
+                return "Couldn't save the correction. \(detail)"
+            case .replacementsCorrupt:
+                return "replacements.json can't be read. It was moved aside to replacements.json.bad so it isn't overwritten; a fresh file will be created."
+            case .replacementsSaveFailed(let detail):
+                return "Couldn't save learned words. \(detail)"
+            }
+        }
+    }
+
+    private let correctionsURL: URL
+    private let replacementsURL: URL
+    private var appendedKey: String?
+
+    public init(
+        correctionsURL: URL = VoicePopPaths.corrections,
+        replacementsURL: URL = VoicePopPaths.replacements
+    ) {
+        self.correctionsURL = correctionsURL
+        self.replacementsURL = replacementsURL
+    }
+
+    /// No-op when the edited text equals the original (nothing to learn or record).
+    @discardableResult
+    public func save(entry: HistoryEntry, correctedText: String, maxPhraseWords: Int, now: Date = Date()) throws -> Bool {
+        let trimmed = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != entry.out, !trimmed.isEmpty else { return false }
+
+        let key = entry.ts + "\u{0}" + trimmed
+        if appendedKey != key {
+            do {
+                try CorrectionStore.appendThrowing(
+                    CorrectionEntry(
+                        ts: ISO8601DateFormatter().string(from: now),
+                        app: entry.app,
+                        style: entry.style,
+                        typed: entry.out,
+                        corrected: trimmed
+                    ),
+                    to: correctionsURL
+                )
+                appendedKey = key
+            } catch {
+                throw SaveError.correctionAppendFailed(String(describing: error))
+            }
+        }
+
+        switch Replacements.inspect(from: replacementsURL) {
+        case .corrupt:
+            Self.quarantine(replacementsURL)
+            throw SaveError.replacementsCorrupt
+        case .missing:
+            var r = Replacements()
+            r.learn(typed: entry.rules, corrected: trimmed, maxPhraseWords: maxPhraseWords, now: now)
+            do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
+        case .ready(var r):
+            r.learn(typed: entry.rules, corrected: trimmed, maxPhraseWords: maxPhraseWords, now: now)
+            do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
+        }
+        return true
+    }
+
+    private static func quarantine(_ url: URL) {
+        let bad = url.appendingPathExtension("bad")
+        try? FileManager.default.removeItem(at: bad)
+        try? FileManager.default.moveItem(at: url, to: bad)
     }
 }

@@ -1,6 +1,39 @@
 import Dispatch
 import Foundation
 
+/// Minimal untyped JSON value, used only to round-trip fields this app does not understand
+/// (forward/backward compatibility with hand-edited or future config files).
+public enum JSONValue: Codable, Equatable, Sendable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([String: JSONValue].self) { self = .object(v) }
+        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+        else { self = .null }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
+
 public enum Style: String, Codable, CaseIterable, Sendable { case auto, casual, formal }
 
 public enum Mascot: String, Codable, CaseIterable, Sendable { case popcorn, beagle }
@@ -55,12 +88,24 @@ public struct StylePrefs: Codable, Equatable, Sendable {
     public var llm = LLMPrefs()
     public var learning = LearningPrefs()
     public var mascot: Mascot = .popcorn
+    /// Top-level keys this version of the app does not recognize. Round-tripped so hand edits or
+    /// a newer app version's fields survive a save from here instead of being dropped.
+    public var unknownFields: [String: JSONValue] = [:]
     public static let `default` = StylePrefs()
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case version, global, perApp, llm, learning, mascot
+    }
 
     public init() {}
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let raw = try? decoder.singleValueContainer(), let all = try? raw.decode([String: JSONValue].self) {
+            var extra = all
+            for key in CodingKeys.allCases { extra.removeValue(forKey: key.stringValue) }
+            unknownFields = extra
+        }
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         if let raw = try c.decodeIfPresent(String.self, forKey: .global) {
             global = Style(rawValue: raw) ?? .auto
@@ -82,6 +127,31 @@ public struct StylePrefs: Codable, Equatable, Sendable {
             mascot = Mascot(rawValue: raw) ?? .popcorn
         } else {
             mascot = .popcorn
+        }
+    }
+
+    /// Custom encode so unknown fields captured at load round-trip back to the file instead of
+    /// being dropped, while known fields stay in their normal shape.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(global.rawValue, forKey: .global)
+        try c.encode(perApp.mapValues(\.rawValue), forKey: .perApp)
+        try c.encode(llm, forKey: .llm)
+        try c.encode(learning, forKey: .learning)
+        try c.encode(mascot.rawValue, forKey: .mascot)
+        if !unknownFields.isEmpty {
+            struct ExtraKey: CodingKey {
+                var stringValue: String
+                init?(stringValue: String) { self.stringValue = stringValue }
+                var intValue: Int? { nil }
+                init?(intValue: Int) { nil }
+            }
+            var extra = encoder.container(keyedBy: ExtraKey.self)
+            for (key, value) in unknownFields {
+                guard let codingKey = ExtraKey(stringValue: key) else { continue }
+                try extra.encode(value, forKey: codingKey)
+            }
         }
     }
 
@@ -120,8 +190,14 @@ public struct StylePrefs: Codable, Equatable, Sendable {
 }
 
 public enum VoicePopPaths {
+    /// `VOICEPOP_CONFIG_DIR` overrides the config directory for fixtures and tests (harness use
+    /// only - never point this at live user data). Read fresh each call so tests can flip it
+    /// between cases without process restart.
     public static var dir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let override = ProcessInfo.processInfo.environment["VOICEPOP_CONFIG_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config")
             .appendingPathComponent("voicepop")
     }
