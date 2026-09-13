@@ -79,6 +79,11 @@ final class SetupChecklistModel: ObservableObject {
                 }
                 try SetupAssistant.writeConfigIfMissing()
                 DispatchQueue.main.async {
+                    if !hadEngine {
+                        // A new Voxtype install has no macOS permissions yet.
+                        self.list.engineReinstalled()
+                        self.store.save(self.list.evidence)
+                    }
                     self.list.engine = .done(hadEngine ? "Voxtype is installed." : "Installed Voxtype.")
                     self.list.model = .working(message: "Checking the speech model…", fraction: nil)
                 }
@@ -142,6 +147,13 @@ final class SetupChecklistModel: ObservableObject {
         commitEvidence(before)
     }
 
+    /// Failure evidence from health, accepted at any time: it can only clear earlier success.
+    func invalidate(with status: DictationStatus) {
+        let failure = status.facts.lastFailure.flatMap(DictationFailure.init(rawValue:))
+        guard list.invalidateEvidence(issue: status.issue, failure: failure) else { return }
+        store.save(list.evidence)
+    }
+
     func observeTranscript() {
         lastTranscriptAt = Date()
         let before = list
@@ -200,6 +212,10 @@ final class SetupChecklistWindowController: NSObject, NSWindowDelegate {
         listening = true
         health.addListener { [weak self] status in
             guard let self else { return }
+            self.model.invalidate(with: status)
+            // Success evidence counts only while the checklist is on screen, where the user was
+            // asked to hold FN and practice.
+            guard self.window?.isVisible == true else { return }
             // A recording started from the menu proves nothing about the FN key.
             if status.daemon.isHot, let menu = self.lastMenuRecordRequest, Date().timeIntervalSince(menu) < 3 {
                 return
@@ -215,7 +231,10 @@ final class SetupChecklistWindowController: NSObject, NSWindowDelegate {
             { _, observer, _, _, _ in
                 guard let observer else { return }
                 let ctrl = Unmanaged<SetupChecklistWindowController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { ctrl.model.observeTranscript() }
+                DispatchQueue.main.async {
+                    guard ctrl.window?.isVisible == true else { return }
+                    ctrl.model.observeTranscript()
+                }
             },
             VoicePopSignal.transcriptReady as CFString,
             nil,
@@ -281,8 +300,13 @@ struct SetupChecklistView: View {
                 if model.list.isComplete {
                     Label("Ready. Hold FN in any app to dictate.", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
+                } else if !model.servicesRunning {
+                    Text("Dictation starts when the engine and model are ready. Click VoicePop in the Dock to return here.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .wrapsLines()
                 } else {
-                    Text("You can close this and come back from Settings › General.")
+                    Text("You can close this and come back from Settings › General › Check Setup…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

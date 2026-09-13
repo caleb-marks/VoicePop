@@ -87,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // First-run setup closed before dictation services started: the checklist is the only way
+        // back, so reopen it instead of hiding the app.
+        if statusItem == nil {
+            SetupAssistant.presentChecklist()
+            return false
+        }
         if statusItem?.revealMenu() != true {
             fputs("VoicePop reopen: status item not clickable (overflow or missing)\n", stderr)
         }

@@ -77,9 +77,12 @@ enum SetupAssistant {
         FileManager.default.fileExists(atPath: configPath)
     }
 
-    /// The engine may report a packaged variant (e.g. `…-int8-prepacked`) of the default model.
+    /// Whether the model Voxtype is configured to load is on disk, so a user who switched to a
+    /// Whisper model in Settings is not sent back through setup. Falls back to the default Parakeet
+    /// model (or a packaged variant of it) when the configured model can't be determined.
     static func modelInstalled() -> Bool {
-        ModelIdentity.isInstalled(modelName, in: VoxtypeModel.installedNames())
+        if let configured = EngineProbe.probe().modelInstalled { return configured }
+        return ModelIdentity.isInstalled(modelName, in: VoxtypeModel.installedNames())
     }
 
     private static func isParakeetCapable(_ bin: String) -> Bool {

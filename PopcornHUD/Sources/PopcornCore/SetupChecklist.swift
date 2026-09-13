@@ -93,6 +93,28 @@ public struct SetupChecklist: Equatable, Sendable {
         evidence.transcriptObserved = true
     }
 
+    /// Later evidence that dictation cannot hear or start makes earlier success stale: macOS
+    /// permissions can be revoked, and reinstalling Voxtype resets them. Returns true when
+    /// anything was cleared.
+    @discardableResult
+    public mutating func invalidateEvidence(issue: DictationIssue?, failure: DictationFailure?) -> Bool {
+        let before = evidence
+        if issue == .permissionsNeeded {
+            evidence.transcriptObserved = false
+            evidence.practiceInsertionObserved = false
+        }
+        if failure == .didNotStart || failure == .noText {
+            evidence.fnRecordingObserved = failure == .didNotStart ? false : evidence.fnRecordingObserved
+            evidence.practiceInsertionObserved = false
+        }
+        return evidence != before
+    }
+
+    /// A freshly installed Voxtype has no permissions yet.
+    public mutating func engineReinstalled() {
+        evidence = Evidence()
+    }
+
     /// How soon after a transcript text must arrive to count as dictated rather than typed by hand.
     public static let practiceInsertionWindow: TimeInterval = 5
 
