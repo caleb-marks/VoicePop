@@ -149,6 +149,24 @@ final class SettingsPolishTests: XCTestCase {
         XCTAssertEqual(CorrectionStore.recent(limit: 10, from: correctionsURL).count, 0)
     }
 
+    // MARK: - Model download progress parsing (fixtures, no live download)
+
+    func testModelDownloadProgressParsesProgressLine() {
+        let line = #"{"event":"progress","pct":42.5,"bytes":1073741824,"total":2147483648}"#
+        XCTAssertEqual(ModelDownloadProgress.parse(line: line), .progress(fraction: 0.425, bytesGB: 1, totalGB: 2))
+    }
+
+    func testModelDownloadProgressParsesErrorLine() {
+        let line = #"{"event":"error","message":"disk full"}"#
+        XCTAssertEqual(ModelDownloadProgress.parse(line: line), .failure("disk full"))
+    }
+
+    func testModelDownloadProgressIgnoresUnrelatedLines() {
+        XCTAssertNil(ModelDownloadProgress.parse(line: ""))
+        XCTAssertNil(ModelDownloadProgress.parse(line: "not json"))
+        XCTAssertNil(ModelDownloadProgress.parse(line: #"{"event":"start"}"#))
+    }
+
     // MARK: - VOICEPOP_CONFIG_DIR override
 
     func testConfigDirOverrideIsRespected() {
