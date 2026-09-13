@@ -35,7 +35,8 @@ extension PopcornRenderer.SceneInput {
             kernels: draws,
             showRecordingDot: showRecordingDot ?? (presentation == .recording),
             mood: snapshot.mood,
-            mascot: mascot
+            mascot: mascot,
+            heap: snapshot.heap
         )
     }
 

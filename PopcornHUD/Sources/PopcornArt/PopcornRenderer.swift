@@ -35,6 +35,8 @@ public enum PopcornRenderer {
         /// Slow-following heat envelope; nil falls back to `heat`.
         public var mood: Double?
         public var mascot: Mascot = .popcorn
+        /// Per-piece displacement of `HeapSeed.pieces` from `PopcornSim`; empty draws the pile at rest.
+        public var heap: [HeapPose] = []
 
         public init(
             heat: Double,
@@ -48,8 +50,10 @@ public enum PopcornRenderer {
             kernels: [KernelDraw],
             showRecordingDot: Bool = true,
             mood: Double? = nil,
-            mascot: Mascot = .popcorn
+            mascot: Mascot = .popcorn,
+            heap: [HeapPose] = []
         ) {
+            self.heap = heap
             self.heat = heat
             self.mood = mood
             self.mascot = mascot
@@ -248,13 +252,7 @@ public enum PopcornRenderer {
 
         // Far heap (behind bag body partially - drawn before bag fill so they sit in mouth)
         for (index, piece) in HeapSeed.pieces.enumerated() where piece.far {
-            let bob = heapBob(index: index, scene: scene)
-            drawKernel(
-                ctx: &ctx,
-                at: CGPoint(x: cx + piece.dx, y: bagTop + piece.dy + bob),
-                scale: piece.s, shape: piece.shape, butter: piece.butter,
-                alpha: 1, rot: piece.rot, heat: scene.heat
-            )
+            drawHeapPiece(ctx: &ctx, index: index, piece: piece, cx: cx, bagTop: bagTop, scene: scene)
         }
 
         // Bag body fill
@@ -306,13 +304,7 @@ public enum PopcornRenderer {
 
         // Near heap + settled kernels
         for (index, piece) in HeapSeed.pieces.enumerated() where !piece.far {
-            let bob = heapBob(index: index, scene: scene)
-            drawKernel(
-                ctx: &ctx,
-                at: CGPoint(x: cx + piece.dx, y: bagTop + piece.dy + bob),
-                scale: piece.s, shape: piece.shape, butter: piece.butter,
-                alpha: 1, rot: piece.rot, heat: scene.heat
-            )
+            drawHeapPiece(ctx: &ctx, index: index, piece: piece, cx: cx, bagTop: bagTop, scene: scene)
         }
         for k in scene.kernels where k.settled {
             drawKernel(
@@ -338,10 +330,16 @@ public enum PopcornRenderer {
         }
     }
 
-    private static func heapBob(index: Int, scene: SceneInput) -> CGFloat {
-        if scene.reduceMotion || scene.heat < 0.12 { return 0 }
-        return CGFloat(sin(scene.bobPhase * 5.5 + Double(index) * 2.1))
-            * CGFloat(scene.heat) * 0.85
+    private static func drawHeapPiece(
+        ctx: inout GraphicsContext, index: Int, piece: HeapPiece, cx: CGFloat, bagTop: CGFloat, scene: SceneInput
+    ) {
+        let pose = !scene.reduceMotion && index < scene.heap.count ? scene.heap[index] : .rest
+        drawKernel(
+            ctx: &ctx,
+            at: CGPoint(x: cx + piece.dx + CGFloat(pose.dx), y: bagTop + piece.dy + CGFloat(pose.dy)),
+            scale: piece.s, shape: piece.shape, butter: piece.butter,
+            alpha: 1, rot: piece.rot + CGFloat(pose.rot), heat: scene.heat
+        )
     }
 
     private static func mouthX(cx: CGFloat, t: CGFloat) -> CGFloat {
@@ -593,31 +591,24 @@ public enum PopcornRenderer {
 
     // MARK: - Kernel
 
-    /// Unit-space SwiftUI `Path`s derived from `KernelArt`'s cached `CGPath`s. Pure functions of
-    /// `shape`, so building them once per shape instead of once per kernel per frame is
-    /// bit-identical output.
+    /// Unit-space silhouettes, converted from `KernelArt`'s cached `CGPath`s once per shape.
     private enum KernelShapeCache {
-        static let toast: [Path] = (0..<KernelArt.templateCount).map { Path(KernelArt.toast(shape: $0)) }
-        static let hull: [Path] = (0..<KernelArt.templateCount).map { Path(KernelArt.hull(shape: $0)) }
-        static let hullBox: [CGRect] = hull.map(\.boundingRect)
-        static let lobeHighlight: [[Path]] = (0..<KernelArt.templateCount).map { s in
-            KernelArt.lobes(shape: s).map { Path(ellipseIn: $0.rect.insetBy(dx: -0.05, dy: -0.05)) }
-        }
-        static let butterPatch: [[Path]] = (0..<KernelArt.templateCount).map { s in
-            KernelArt.lobes(shape: s).prefix(2).map { lobe in
-                Path(ellipseIn: CGRect(
-                    x: lobe.x - lobe.rx * 0.35,
-                    y: lobe.y - lobe.ry * 0.25,
-                    width: lobe.rx * 0.85,
-                    height: lobe.ry * 0.65
-                ))
-            }
-        }
+        static let outline: [Path] = (0..<KernelArt.templateCount).map { Path(KernelArt.path(shape: $0)) }
         static func index(_ shape: Int) -> Int {
             ((shape % KernelArt.templateCount) + KernelArt.templateCount) % KernelArt.templateCount
         }
     }
 
+    /// Paint the kernel sprite cache for a display scale ahead of the first frame (about a few
+    /// tens of milliseconds for a 2× display). Optional: sprites are otherwise painted on first use.
+    public static func prewarmKernelSprites(displayScale: CGFloat) {
+        KernelSprites.prewarm(density: KernelSprites.density(displayScale: displayScale))
+    }
+
+    /// One kernel: a soft contact shadow, the pre-rendered body sprite (lobes, butter, folds),
+    /// and a scene-space light gradient over the silhouette. The light is computed in scene
+    /// space and counter-rotated into the kernel's frame, so a tumbling kernel keeps its highlight
+    /// on the upper left exactly like the resting pile. `airborne` only lightens the shadow.
     public static func drawKernel(
         ctx: inout GraphicsContext,
         at: CGPoint,
@@ -629,135 +620,37 @@ public enum PopcornRenderer {
         heat: Double = 0,
         airborne: Bool = false
     ) {
+        guard alpha > 0 else { return }
         let r = CGFloat(Tunables.kernelRadius) * scale
-        var transform = CGAffineTransform(translationX: at.x, y: at.y)
-            .rotated(by: rot).scaledBy(x: r, y: r)
-        guard let outline = KernelArt.path(shape: shape).copy(using: &transform),
-              let creasePath = KernelArt.creases(shape: shape).copy(using: &transform)
-        else { return }
-
-        let silhouette = Path(outline)
-        let creases = Path(creasePath)
-        let shade = PaletteUI.puffShade
-        let creaseColor = PaletteUI.puffCrease
-        let b = Double(max(0, min(1, butter))) + heat * 0.03
-        let lobes = KernelArt.lobes(shape: shape)
+        let density = KernelSprites.density(displayScale: ctx.environment.displayScale)
+        let e = KernelSprites.extent
+        let unitRect = CGRect(x: -e, y: -e, width: e * 2, height: e * 2)
         let si = KernelShapeCache.index(shape)
+        _ = heat
 
-        func paint(_ layer: inout GraphicsContext) {
-            // 1. Contact shadow
-            var shadow = layer
-            shadow.translateBy(x: 0.7, y: 1.4)
-            shadow.fill(silhouette, with: .color(.black.opacity(0.12)))
+        var c = ctx
+        if alpha < 1 { c.opacity *= alpha }
 
-            // 2. Base fill - near-white with warm underside falloff
-            layer.fill(
-                silhouette,
-                with: .linearGradient(
-                    PaletteUI.kernelBase,
-                    startPoint: CGPoint(x: at.x - r * 0.85, y: at.y - r * 0.9),
-                    endPoint: CGPoint(x: at.x + r * 0.55, y: at.y + r * 0.95)
-                )
-            )
+        var shadow = c
+        shadow.translateBy(x: at.x + 0.55, y: at.y + (airborne ? 1.1 : 1.35))
+        shadow.rotate(by: .radians(Double(rot)))
+        shadow.scaleBy(x: r, y: r)
+        if airborne { shadow.opacity *= 0.8 }
+        shadow.draw(KernelSprites.shadow(shape: si, density: density), in: unitRect)
 
-            // 3–6. Clipped detail in unit space (rotated with kernel)
-            layer.drawLayer { detail in
-                detail.clip(to: silhouette)
-                detail.translateBy(x: at.x, y: at.y)
-                detail.rotate(by: .radians(Double(rot)))
-                detail.scaleBy(x: r, y: r)
+        c.translateBy(x: at.x, y: at.y)
+        c.rotate(by: .radians(Double(rot)))
+        c.scaleBy(x: r, y: r)
+        c.draw(KernelSprites.body(shape: si, butter: butter, density: density), in: unitRect)
 
-                // Per-lobe radial volume shading (highlight only - shade comes from base gradient).
-                // Airborne kernels are small and moving; skip the per-lobe pass to hold frame budget.
-                if !airborne {
-                    for (li, lobe) in lobes.enumerated() {
-                        let hiCenter = CGPoint(x: lobe.x - lobe.rx * 0.35, y: lobe.y - lobe.ry * 0.40)
-                        let lobePath = KernelShapeCache.lobeHighlight[si][li]
-                        detail.fill(
-                            lobePath,
-                            with: .radialGradient(
-                                PaletteUI.lobeHighlight,
-                                center: hiCenter,
-                                startRadius: 0,
-                                endRadius: max(lobe.rx, lobe.ry) * 0.95
-                            )
-                        )
-                    }
-                }
-
-                // Soft toast patches
-                let toast = KernelShapeCache.toast[si]
-                detail.fill(toast, with: .color(shade.opacity(0.18 + b * 0.14)))
-
-                // Butter sheen on 1–2 lobes (first two)
-                for (i, lobe) in lobes.prefix(2).enumerated() {
-                    let strength = b * (i == 0 ? 0.70 : 0.40)
-                    let patch = KernelShapeCache.butterPatch[si][i]
-                    detail.fill(
-                        patch,
-                        with: .radialGradient(
-                            Gradient(colors: [
-                                PaletteUI.puffButter.opacity(strength),
-                                .clear,
-                            ]),
-                            center: CGPoint(x: lobe.x, y: lobe.y),
-                            startRadius: 0,
-                            endRadius: max(lobe.rx, lobe.ry) * 0.55
-                        )
-                    )
-                }
-
-                // Hull remnant - drawn in unit space so gradient and speck rotate with the kernel.
-                let hullUnit = KernelShapeCache.hull[si]
-                let hullBox = KernelShapeCache.hullBox[si]
-                let hullCenter = CGPoint(x: hullBox.midX, y: hullBox.midY)
-                detail.fill(
-                    hullUnit,
-                    with: .radialGradient(
-                        PaletteUI.hull,
-                        center: CGPoint(x: hullCenter.x - 0.03, y: hullCenter.y - 0.02),
-                        startRadius: 0,
-                        endRadius: max(hullBox.width, hullBox.height) * 0.75
-                    )
-                )
-                detail.fill(
-                    Path(ellipseIn: CGRect(
-                        x: hullCenter.x - 0.05, y: hullCenter.y - 0.045,
-                        width: 0.05, height: 0.04
-                    )),
-                    with: .color(.white.opacity(0.45))
-                )
-            }
-
-            // Creases in scene space (already transformed)
-            layer.drawLayer { fold in
-                fold.clip(to: silhouette)
-                fold.stroke(
-                    creases,
-                    with: .color(shade.opacity(0.26)),
-                    style: StrokeStyle(lineWidth: r * 0.16, lineCap: .round)
-                )
-                fold.stroke(
-                    creases,
-                    with: .color(creaseColor.opacity(0.55)),
-                    style: StrokeStyle(lineWidth: r * 0.04, lineCap: .round)
-                )
-            }
-
-            // Faint full outline for dark-bg readability. Upper-left rim light comes from the
-            // base gradient; a separate rim layer was dropped to hold the frame budget.
-            layer.stroke(silhouette, with: .color(shade.opacity(0.12)), lineWidth: 0.45)
+        let cosR = CGFloat(cos(Double(-rot)))
+        let sinR = CGFloat(sin(Double(-rot)))
+        func local(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: x * cosR - y * sinR, y: x * sinR + y * cosR)
         }
-
-        // Opacity 1.0 with a normal blend mode makes the transparency layer a no-op, and that is
-        // the entire settled heap. Draw straight into the caller's context instead.
-        if alpha >= 1 {
-            paint(&ctx)
-        } else {
-            ctx.drawLayer { layer in
-                layer.opacity = alpha
-                paint(&layer)
-            }
-        }
+        c.fill(
+            KernelShapeCache.outline[si],
+            with: .linearGradient(PaletteUI.kernelLight, startPoint: local(-0.75, -0.95), endPoint: local(0.45, 0.95))
+        )
     }
 }
