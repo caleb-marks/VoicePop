@@ -102,10 +102,15 @@ public enum Tunables {
     public static let moodReleaseRate: Double = 1.15
 
     public static let enterMs: Double = 120
-    /// Recording → transcribing collapse. 160 ms (was 100): long enough for the tub to visibly
-    /// sink and fade into the capsule (~6 frames at 60 Hz), still a snappy dismissal. Reduce Motion
-    /// shows the capsule immediately either way.
-    public static let collapseMs: Double = 160
+    /// Recording → transcribing collapse for the beagle (unchanged).
+    public static let collapseMs: Double = 100
+    /// Popcorn collapse: long enough for the tub to visibly sink and fade into the capsule (~6
+    /// frames at 60 Hz), still a snappy dismissal. Reduce Motion shows the capsule immediately.
+    public static let popcornCollapseMs: Double = 160
+
+    public static func collapseMs(for mascot: Mascot) -> Double {
+        mascot == .popcorn ? popcornCollapseMs : collapseMs
+    }
     public static let cleanupFade: Double = 0.120
     /// Airborne kernels falling outside the mouth start their cleanup fade this far below the
     /// lip, so strays never reach the status capsule.
