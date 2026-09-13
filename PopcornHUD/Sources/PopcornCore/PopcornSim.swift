@@ -343,7 +343,7 @@ public final class PopcornSim {
         let spread = rng.next(in: -1...1) * Tunables.spreadPxPerSec
             * (Tunables.spreadHeatBase + heat * Tunables.spreadHeatScale)
             * spreadAccent
-        let scale = rng.next(in: 0.72...1.08)
+        let scale = rng.next(in: Tunables.kernelScaleMin...Tunables.kernelScaleMax)
         let r0 = Tunables.kernelRadius * scale
         var body = KernelBody(
             id: nextID, front: rng.next(in: 0...1) < 0.28,
@@ -421,6 +421,10 @@ public final class PopcornSim {
         return Tunables.heapSurface(x: k.x) + heapMotion.surfaceOffset(atX: k.x - cx) - k.hitRadius + k.nestle
     }
 
+    private var offsideFadeY: Double {
+        Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH) + Tunables.offsideFadeBelowLip
+    }
+
     private func integrate(dt: Double) {
         let cx = Double(Tunables.cardW) / 2
         let restLimitX = Double(Tunables.mouthHalf) - 6
@@ -443,6 +447,11 @@ public final class PopcornSim {
                 if k.y > Double(Tunables.cardH) + 30 || k.x < -24 || k.x > Double(Tunables.cardW) + 24 {
                     kernels.remove(at: i)
                     continue
+                }
+                // Falling past the lip outside the mouth: fade out now rather than tumbling down
+                // beside the tub and across the status capsule.
+                if k.vy > 0, k.y > offsideFadeY, abs(k.x - cx) > Double(Tunables.mouthHalf) {
+                    k.maxLife = min(k.maxLife, k.life + Tunables.cleanupFade)
                 }
             } else if !reduceMotion {
                 // Resting on the pile: slide and spin down to a stop, ride the surface as the

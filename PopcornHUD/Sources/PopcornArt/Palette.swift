@@ -40,7 +40,8 @@ public enum Palette {
     public static let popcornFineEdge = NSColor(srgbRed: 0xBB / 255, green: 0xA7 / 255, blue: 0x8A / 255, alpha: 1)
     public static let popcornStatusSurface = NSColor(srgbRed: 0xFA / 255, green: 0xF7 / 255, blue: 0xF1 / 255, alpha: 1)
     public static let popcornStatusText = NSColor(srgbRed: 0x34 / 255, green: 0x2F / 255, blue: 0x2C / 255, alpha: 1)
-    public static let popcornRecordingDot = NSColor(srgbRed: 0xB4 / 255, green: 0x48 / 255, blue: 0x46 / 255, alpha: 1)
+    /// Cinema red, a shade deeper than the tub ink: 5.3:1 against the capsule (was #B44846, 5.0:1).
+    public static let popcornRecordingDot = srgb(0xBF2F36)
 
     // Buttered movie-theater kernels. Creamy lobe highlights, golden midtones where lobes meet,
     // saturated butter glaze, and warm amber undersides; folds are soft golden-brown, not ink.
@@ -90,7 +91,7 @@ public enum PaletteUI {
         .init(color: Color(nsColor: Palette.kernelHighlight).opacity(0.36), location: 0),
         .init(color: Color(nsColor: Palette.kernelHighlight).opacity(0.0), location: 0.42),
         .init(color: Color(nsColor: Palette.kernelAmber).opacity(0.0), location: 0.55),
-        .init(color: Color(nsColor: Palette.kernelAmber).opacity(0.30), location: 1),
+        .init(color: Color(nsColor: Palette.kernelAmber).opacity(0.40), location: 1),
     ])
     public static let kernelBase = Gradient(colors: [puffWhite, puffCream, puffUnderside])
     public static let lobeHighlight = Gradient(colors: [.white.opacity(0.50), .clear])

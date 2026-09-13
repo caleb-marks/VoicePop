@@ -268,8 +268,8 @@ public enum PopcornRenderer {
         drawRimHalf(ctx: &ctx, cx: cx, bagTop: bagTop, mouthSag: mouthSag, front: false)
 
         // Far heap (behind bag body partially - drawn before bag fill so they sit in mouth)
-        for (index, piece) in HeapSeed.pieces.enumerated() where piece.far {
-            drawHeapPiece(ctx: &ctx, index: index, piece: piece, cx: cx, bagTop: bagTop, scene: scene)
+        for index in HeapSeed.drawOrder where HeapSeed.pieces[index].far {
+            drawHeapPiece(ctx: &ctx, index: index, piece: HeapSeed.pieces[index], cx: cx, bagTop: bagTop, scene: scene)
         }
 
         // Bag body fill
@@ -320,8 +320,8 @@ public enum PopcornRenderer {
         }
 
         // Near heap + settled kernels
-        for (index, piece) in HeapSeed.pieces.enumerated() where !piece.far {
-            drawHeapPiece(ctx: &ctx, index: index, piece: piece, cx: cx, bagTop: bagTop, scene: scene)
+        for index in HeapSeed.drawOrder where !HeapSeed.pieces[index].far {
+            drawHeapPiece(ctx: &ctx, index: index, piece: HeapSeed.pieces[index], cx: cx, bagTop: bagTop, scene: scene)
         }
         for k in scene.kernels where k.settled {
             drawKernel(
@@ -638,7 +638,10 @@ public enum PopcornRenderer {
         airborne: Bool = false
     ) {
         guard alpha > 0 else { return }
-        let r = CGFloat(Tunables.kernelRadius) * scale
+        // A fading kernel also shrinks a little and drops its shadow, so it melts away instead of
+        // leaving a gray smudge on dark backgrounds.
+        let fading = alpha < 1
+        let r = CGFloat(Tunables.kernelRadius) * scale * (fading ? CGFloat(0.55 + 0.45 * alpha) : 1)
         let density = KernelSprites.density(displayScale: ctx.environment.displayScale)
         let e = KernelSprites.extent
         let unitRect = CGRect(x: -e, y: -e, width: e * 2, height: e * 2)
@@ -648,12 +651,14 @@ public enum PopcornRenderer {
         var c = ctx
         if alpha < 1 { c.opacity *= alpha }
 
-        var shadow = c
-        shadow.translateBy(x: at.x + 0.55, y: at.y + (airborne ? 1.1 : 1.35))
-        shadow.rotate(by: .radians(Double(rot)))
-        shadow.scaleBy(x: r, y: r)
-        if airborne { shadow.opacity *= 0.8 }
-        shadow.draw(KernelSprites.shadow(shape: si, density: density), in: unitRect)
+        if !fading {
+            var shadow = c
+            shadow.translateBy(x: at.x + 0.55, y: at.y + (airborne ? 1.1 : 1.35))
+            shadow.rotate(by: .radians(Double(rot)))
+            shadow.scaleBy(x: r, y: r)
+            if airborne { shadow.opacity *= 0.8 }
+            shadow.draw(KernelSprites.shadow(shape: si, density: density), in: unitRect)
+        }
 
         c.translateBy(x: at.x, y: at.y)
         c.rotate(by: .radians(Double(rot)))

@@ -255,6 +255,25 @@ final class HeapMotionTests: XCTestCase {
         XCTAssertLessThanOrEqual(sim.emittedCount - emitted, 4)
     }
 
+    func testStrayKernelsFadeBeforeReachingTheStatusCapsule() {
+        let sim = PopcornSim(seed: 29)
+        sim.allowSpawn = true
+        let cx = Double(Tunables.cardW) / 2
+        let lip = Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH)
+        // Top of the status capsule under the visible tub (see PopcornRenderer's metrics).
+        let capsuleTop = Double(Tunables.cardH - Tunables.bagBottomPad) - 22 + 6
+        var strays = 0
+        _ = runSpeech(sim, seconds: 20) { snap, _ in
+            for k in snap.kernels where !k.settled && abs(k.x - cx) > Double(Tunables.mouthHalf) && k.vy > 0 {
+                if k.y > lip + 30 { strays += 1 }
+                if k.y + k.hitRadius > capsuleTop {
+                    XCTAssertEqual(k.alpha, 0, accuracy: 1e-9, "a stray kernel is still visible over the capsule")
+                }
+            }
+        }
+        XCTAssertGreaterThan(strays, 20, "energetic speech should throw some kernels past the rim")
+    }
+
     func testHeapPosesInterpolateBetweenFixedSteps() {
         let sim = PopcornSim(seed: 17)
         var mono = runSpeech(sim, seconds: 1.5)
