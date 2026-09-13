@@ -66,6 +66,20 @@ enum EngineControl {
             }
         }
         processQueue.async {
+            // Stop every live daemon first rather than relying on the script's `pkill -x voxtype-bin`,
+            // which misses `voxtype` from Homebrew and would leave it running beside a new one.
+            switch DaemonProcess.restartPlan(liveDaemons: DaemonProcess.liveDaemons(), bundlePath: voxtypeApp) {
+            case .refuse(let path):
+                Timing.event("engine.restart.refused")
+                finish(.failure(Failure(message: "Voxtype is running from \(path). Restart it there, or quit it and use Restart again.")))
+                return
+            case .terminate(let pids):
+                let survivors = DaemonProcess.terminate(pids)
+                guard survivors.isEmpty else {
+                    finish(.failure(Failure(message: "Voxtype didn’t quit, so it wasn’t restarted. Quit Voxtype, then use Restart again.")))
+                    return
+                }
+            }
             if let script = restartScriptPath() {
                 // The script sleeps and retries (~4 s); wait on this queue, never on main. A hung
                 // script is killed so later restarts do not join it forever.
