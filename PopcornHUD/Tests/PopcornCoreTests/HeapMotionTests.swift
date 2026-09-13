@@ -244,6 +244,26 @@ final class HeapMotionTests: XCTestCase {
         XCTAssertLessThanOrEqual(sim.emittedCount - emitted, 4)
     }
 
+    func testHeapPosesInterpolateBetweenFixedSteps() {
+        let sim = PopcornSim(seed: 17)
+        var mono = runSpeech(sim, seconds: 1.5)
+        var strictlyBetween = 0
+        // A 3 ms display clock against the 8.3 ms fixed step: most frames fall between steps.
+        for _ in 0..<200 {
+            mono += 3
+            let snap = sim.advance(toMonoMs: mono, peak: 0.3, peakFresh: false)
+            guard !snap.heap.isEmpty else { continue }
+            let prev = sim.heapMotion.previous, cur = sim.heapMotion.pose
+            for i in snap.heap.indices {
+                let lo = min(prev[i].dy, cur[i].dy), hi = max(prev[i].dy, cur[i].dy)
+                XCTAssertGreaterThanOrEqual(snap.heap[i].dy, lo - 1e-9)
+                XCTAssertLessThanOrEqual(snap.heap[i].dy, hi + 1e-9)
+                if hi - lo > 1e-4, snap.heap[i].dy > lo + 1e-6, snap.heap[i].dy < hi - 1e-6 { strictlyBetween += 1 }
+            }
+        }
+        XCTAssertGreaterThan(strictlyBetween, 100, "heap poses should blend, not snap, between steps")
+    }
+
     func testRestingKernelsFollowTheDisplacedSurface() {
         let sim = PopcornSim(seed: 13)
         sim.allowSpawn = true
