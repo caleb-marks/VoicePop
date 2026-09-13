@@ -21,6 +21,10 @@ public struct EngineFacts: Equatable, Sendable {
     public var download: Download?
     /// True only with evidence (verified or functional check). Never inferred from silence alone.
     public var permissionsNeeded: Bool
+    /// Which permission the evidence points at, when known.
+    public var permissionHint: PermissionHint?
+    /// Why the engine is unusable when it is installed but cannot run the configured engine.
+    public var engineProblem: String?
     /// Set while recording when no microphone-level packets arrive.
     public var audioLevelsUnavailable: Bool
     /// Last distinguishable transcription/insertion failure, cleared by the next success.
@@ -43,6 +47,12 @@ public struct EngineFacts: Equatable, Sendable {
         self.audioLevelsUnavailable = audioLevelsUnavailable
         self.lastFailure = lastFailure
     }
+}
+
+/// Permission a functional check points at. Permissions belong to Voxtype.app, not VoicePop.
+public enum PermissionHint: String, Equatable, Sendable {
+    /// Recent recordings delivered frames whose peak was exactly zero.
+    case microphone
 }
 
 /// The single most important thing standing between the user and dictation.
@@ -109,11 +119,43 @@ public struct DictationStatus: Equatable, Sendable {
             return "Downloading speech model…"
         case .modelMissing: return "Speech model not installed"
         case .engineNotRunning: return "Dictation isn’t running"
-        case .permissionsNeeded: return "Voxtype needs permission"
-        case .lastDictationFailed: return "Last dictation didn’t finish"
+        case .permissionsNeeded:
+            return facts.permissionHint == .microphone ? "Voxtype can’t hear the microphone" : "Voxtype needs permission"
+        case .lastDictationFailed(let message):
+            return DictationFailure(rawValue: message) != nil ? message : "Last dictation didn’t finish"
         case .audioLevelsUnavailable, nil:
             if case .other(let s) = daemon { return s.capitalized }
             return "Ready · Hold FN to dictate"
+        }
+    }
+
+    /// Optional second line explaining the headline and what to do. nil when there is nothing to add.
+    public var detail: String? {
+        switch issue {
+        case .engineNotInstalled:
+            return facts.engineProblem ?? "Set up Voxtype to dictate."
+        case .modelDownloading:
+            return facts.download.map { "Dictation works again when “\($0.model)” finishes downloading." }
+        case .modelMissing:
+            return facts.modelTitle.map { "Download “\($0)” or choose another model." } ?? "Download a speech model to dictate."
+        case .engineNotRunning:
+            return "Restart dictation to try again."
+        case .permissionsNeeded:
+            if facts.permissionHint == .microphone {
+                return "Recent recordings were completely silent. In Privacy & Security → Microphone, allow Voxtype."
+            }
+            return "Grant the permissions Voxtype asks for in Privacy & Security."
+        case .lastDictationFailed(let message):
+            switch DictationFailure(rawValue: message) {
+            case .noText: return "VoicePop didn’t receive text from it. Try again, speaking a little longer."
+            case .didNotStart, .stoppedUnexpectedly: return "Try again. If it keeps happening, restart dictation."
+            case .transcriptionStuck: return "Wait a moment, or restart dictation."
+            case nil: return message
+            }
+        case .audioLevelsUnavailable:
+            return "Recording continues, but VoicePop can’t show your voice level."
+        case nil:
+            return nil
         }
     }
 
@@ -123,7 +165,9 @@ public struct DictationStatus: Equatable, Sendable {
         case .modelDownloading: return [.openSettings]
         case .engineNotRunning: return [.restartEngine, .openSetup]
         case .permissionsNeeded: return [.openPrivacySettings, .openSetup]
-        case .lastDictationFailed: return [.copyLastText, .restartEngine]
+        case .lastDictationFailed(let message):
+            // Known failures produced no new text, so copying would copy an older dictation.
+            return DictationFailure(rawValue: message) == nil ? [.copyLastText, .restartEngine] : [.restartEngine]
         case .audioLevelsUnavailable: return [.restartEngine]
         case nil: return []
         }
