@@ -121,10 +121,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = buildMenu()
         for item in menu.items where item.action != nil { item.target = self }
         lastState = state
+        recordMenuItem?.isEnabled = state.isHot || (lastStatus.canDictate && !state.isTranscribing)
         recordMenuItem?.title = state.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isHidden = !state.isHot
         cancelMenuItem?.isEnabled = state.isHot
         lastStatus = status
+        recordMenuItem?.isEnabled = lastState.isHot || (status.canDictate && !lastState.isTranscribing)
         statusMenuItem?.title = status.headline
         rebuildRecoveryItemsForSnapshot(in: menu, actions: status.actions)
         return menu
@@ -140,7 +142,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.insertItem(item, at: insertAt)
             insertAt += 1
         }
-        separator.isHidden = actions.isEmpty
+        separator.isHidden = false
     }
 
     private func apply(state: DaemonState) {
@@ -148,6 +150,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             OllamaWarmer.shared.ensureWarm(prefs.llm)
         }
         lastState = state
+        recordMenuItem?.isEnabled = state.isHot || (lastStatus.canDictate && !state.isTranscribing)
         recordMenuItem?.title = state.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isHidden = !state.isHot
         cancelMenuItem?.isEnabled = state.isHot
@@ -160,6 +163,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// whether the menu is allowed to say "Ready".
     private func apply(status: DictationStatus) {
         lastStatus = status
+        recordMenuItem?.isEnabled = lastState.isHot || (status.canDictate && !lastState.isTranscribing)
         statusMenuItem?.title = status.headline
         statusMenuItem?.setAccessibilityLabel(status.headline)
         if let title = modelShortTitle, status.issue == nil {
@@ -183,6 +187,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         let status = NSMenuItem(title: "Ready · Hold FN to dictate", action: nil, keyEquivalent: "")
         status.isEnabled = false
@@ -200,8 +205,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         recoverySep.isHidden = true
         recoverySeparator = recoverySep
         menu.addItem(recoverySep)
-
-        menu.addItem(.separator())
 
         let record = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "")
         recordMenuItem = record
@@ -238,6 +241,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func buildStyleMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         for style in Style.allCases {
             let item = NSMenuItem(title: Self.styleTitle(style), action: #selector(setGlobalStyle(_:)), keyEquivalent: "")
             item.representedObject = style.rawValue
@@ -283,7 +287,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             recoveryItems.append(item)
             insertAt += 1
         }
-        recoverySeparator?.isHidden = actions.isEmpty
+        recoverySeparator?.isHidden = false
     }
 
     private func title(for action: RecoveryAction) -> String {
@@ -336,6 +340,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         for (style, item) in globalStyleItems { item.state = prefs.global == style ? .on : .off }
         appHeaderItem?.title = targetApp.isEmpty ? "This app:" : "This app - \(targetApp)"
+        recordMenuItem?.isEnabled = lastState.isHot || (lastStatus.canDictate && !lastState.isTranscribing)
         recordMenuItem?.title = lastState.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isHidden = !lastState.isHot
         cancelMenuItem?.isEnabled = lastState.isHot
@@ -404,9 +409,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// holds in memory. Never touches `history.jsonl` on the main thread.
     private func refreshFixLastItem() {
         guard let out = LastHistoryEntryCache.current()?.out.trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else {
+            fixLastMenuItem?.isEnabled = false
             fixLastMenuItem?.title = "Fix Last Dictation…"
             return
         }
+        fixLastMenuItem?.isEnabled = true
         let clip = out.count > 28 ? String(out.prefix(27)) + "…" : out
         fixLastMenuItem?.title = "Fix \u{201c}\(clip)\u{201d}…"
     }
