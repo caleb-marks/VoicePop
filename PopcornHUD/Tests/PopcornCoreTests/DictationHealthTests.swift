@@ -17,15 +17,19 @@ final class DictationStatusTests: XCTestCase {
 
     func testPriorityOrderAndNeverReadyWhenBlocked() {
         var f = ready
+        f.configuredModel = "parakeet-tdt-0.6b-v3-int8"
         f.engineInstalled = false
-        f.download = .init(model: "small.en", fraction: 0.5)
         f.modelInstalled = false
+        f.download = .init(model: "parakeet-tdt-0.6b-v3-int8", fraction: 0.5)
         f.permissionsNeeded = true
         f.lastFailure = DictationFailure.noText.rawValue
         let order: [(DictationIssue, (inout EngineFacts) -> Void)] = [
             (.engineNotInstalled, { $0.engineInstalled = true }),
+            // Downloading the missing configured model is the fix in progress.
             (.modelDownloading(fraction: 0.5), { $0.download = nil }),
-            (.modelMissing, { $0.modelInstalled = true }),
+            (.modelMissing, { $0.modelInstalled = true; $0.download = .init(model: "parakeet-tdt-0.6b-v3-int8-prepacked", fraction: 0.5) }),
+            // A dead daemon outranks a (re)download of the configured model, so Restart stays visible.
+            (.engineNotRunning, { _ in }),
         ]
         for (expected, fix) in order {
             let s = DictationStatus(daemon: .missing, facts: f)
@@ -34,7 +38,8 @@ final class DictationStatusTests: XCTestCase {
             XCTAssertFalse(s.headline.hasPrefix("Ready"), s.headline)
             fix(&f)
         }
-        XCTAssertEqual(DictationStatus(daemon: .missing, facts: f).issue, .engineNotRunning)
+        XCTAssertEqual(DictationStatus(daemon: .idle, facts: f).issue, .modelDownloading(fraction: 0.5))
+        f.download = nil
         XCTAssertEqual(DictationStatus(daemon: .idle, facts: f).issue, .permissionsNeeded)
         f.permissionsNeeded = false
         XCTAssertEqual(DictationStatus(daemon: .idle, facts: f).issue, .lastDictationFailed(DictationFailure.noText.rawValue))
@@ -45,16 +50,37 @@ final class DictationStatusTests: XCTestCase {
                      "levels only matter while recording")
     }
 
+    func testDownloadOfAnotherModelIsInformationalOnly() {
+        var f = ready
+        f.configuredModel = "parakeet-tdt-0.6b-v3-int8-prepacked"
+        f.download = .init(model: "large-v3-turbo", fraction: 0.4)
+        let s = DictationStatus(daemon: .idle, facts: f)
+        XCTAssertNil(s.issue)
+        XCTAssertTrue(s.canDictate)
+        XCTAssertEqual(s.headline, "Ready · Hold FN to dictate")
+        XCTAssertEqual(s.detail, "Downloading “large-v3-turbo”… 40%")
+        XCTAssertEqual(DictationStatus(daemon: .missing, facts: f).issue, .engineNotRunning)
+        // Same model through its packaged name, or unknown configuration: blocking.
+        f.download = .init(model: "parakeet-tdt-0.6b-v3-int8", fraction: nil)
+        XCTAssertEqual(DictationStatus(daemon: .idle, facts: f).issue, .modelDownloading(fraction: nil))
+        f.configuredModel = nil
+        f.download = .init(model: "large-v3-turbo", fraction: nil)
+        XCTAssertFalse(DictationStatus(daemon: .idle, facts: f).canDictate)
+    }
+
     func testBlockingIssuesCannotDictateButSoftIssuesCan() {
         var f = ready
         f.permissionsNeeded = true
-        XCTAssertFalse(DictationStatus(daemon: .idle, facts: f).canDictate)
+        f.permissionHint = .microphone
+        XCTAssertTrue(DictationStatus(daemon: .idle, facts: f).canDictate, "heuristic permission evidence keeps menu start useful")
+        XCTAssertFalse(DictationStatus(daemon: .missing, facts: f).canDictate)
         f.permissionsNeeded = false
         f.lastFailure = "Something odd"
         XCTAssertTrue(DictationStatus(daemon: .idle, facts: f).canDictate)
         f.lastFailure = nil
         f.audioLevelsUnavailable = true
         XCTAssertTrue(DictationStatus(daemon: .recording, facts: f).canDictate)
+        XCTAssertFalse(DictationStatus(daemon: .idle, facts: EngineFacts(modelInstalled: false)).canDictate)
     }
 
     func testHeadlinesDetailsAndActionsPerIssue() {
@@ -102,12 +128,6 @@ final class DictationStatusTests: XCTestCase {
             XCTAssertEqual(s.actions, [.copyLastText, .restartEngine])
             XCTAssertTrue(s.detail!.contains("saved"))
         }
-        XCTAssertTrue(DictationSessionTracker.historyEntry(ts: "2026-09-12T20:00:05Z",
-                                                          isFromSessionStartedAt: TimingReport.parseWall("2026-09-12T20:00:05.600Z")!),
-                      "second-precision stamps get one second of tolerance")
-        XCTAssertFalse(DictationSessionTracker.historyEntry(ts: "2026-09-12T20:00:02Z",
-                                                           isFromSessionStartedAt: TimingReport.parseWall("2026-09-12T20:00:05Z")!))
-        XCTAssertFalse(DictationSessionTracker.historyEntry(ts: "garbage", isFromSessionStartedAt: Date()))
 
         s = status { $0.lastFailure = "Voxtype reported an error" }
         XCTAssertEqual(s.headline, "Last dictation didn’t finish")
@@ -121,6 +141,28 @@ final class DictationStatusTests: XCTestCase {
 }
 
 final class DictationSessionTrackerTests: XCTestCase {
+    private func entry(_ ts: String, _ out: String) -> HistoryEntry {
+        HistoryEntry(ts: ts, app: "", style: "auto", raw: out, rules: out, out: out, llm: false)
+    }
+
+    func testCopyEvidenceRequiresAnEntryNewerThanTheSessionBaseline() {
+        let start = TimingReport.parseWall("2026-09-12T12:00:01.500Z")!
+        let previous = entry("2026-09-12T12:00:01Z", "dictation A")
+        // Back-to-back: A was appended at 12:00:01.1, B started at 12:00:01.5 and failed.
+        XCTAssertFalse(DictationSessionTracker.historyEntry(previous, isFromSessionStartedAt: start,
+                                                            baseline: HistorySnapshot(last: previous)),
+                       "same-second timestamp of the previous dictation must not count")
+        let mine = entry("2026-09-12T12:00:04Z", "dictation B")
+        XCTAssertTrue(DictationSessionTracker.historyEntry(mine, isFromSessionStartedAt: start, baseline: HistorySnapshot(last: previous)))
+        XCTAssertTrue(DictationSessionTracker.historyEntry(mine, isFromSessionStartedAt: start, baseline: HistorySnapshot(last: nil)))
+        XCTAssertFalse(DictationSessionTracker.historyEntry(mine, isFromSessionStartedAt: start, baseline: nil), "unknown baseline")
+        XCTAssertFalse(DictationSessionTracker.historyEntry(entry("2026-09-12T11:59:00Z", "old"), isFromSessionStartedAt: start,
+                                                            baseline: HistorySnapshot(last: previous)))
+        XCTAssertFalse(DictationSessionTracker.historyEntry(entry("2026-09-12T12:00:04Z", "  "), isFromSessionStartedAt: start,
+                                                            baseline: HistorySnapshot(last: previous)))
+        XCTAssertFalse(DictationSessionTracker.historyEntry(nil, isFromSessionStartedAt: start, baseline: HistorySnapshot(last: nil)))
+    }
+
     private func tracker(signal: Bool = true) -> DictationSessionTracker {
         var t = DictationSessionTracker(transcriptSignalExpected: signal)
         t.stateChanged(.idle, atMs: 0)
