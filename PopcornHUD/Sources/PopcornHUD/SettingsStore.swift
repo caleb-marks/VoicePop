@@ -27,7 +27,8 @@ final class SettingsStore: ObservableObject {
     @Published var status = DictationStatus(daemon: .missing, facts: EngineFacts())
 
     private var observer: NSObjectProtocol?
-    private var healthAttached = false
+    private weak var attachedHealth: DictationHealthMonitor?
+    private var healthToken: DictationHealthMonitor.ListenerToken?
 
     init() {
         prefs = StylePrefsCache.current()
@@ -41,6 +42,7 @@ final class SettingsStore: ObservableObject {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let attachedHealth, let healthToken { attachedHealth.removeListener(healthToken) }
     }
 
     /// Re-reads the cache. Call when the Settings window is (re)shown, in case the menu bar
@@ -54,9 +56,9 @@ final class SettingsStore: ObservableObject {
     /// repeatedly - a no-op once attached, and a no-op while `health` is still nil (so a window
     /// built before `AppDelegate` sets `health` picks it up on a later call instead of never).
     func attachHealthIfNeeded(_ health: DictationHealthMonitor?) {
-        guard !healthAttached, let health else { return }
-        healthAttached = true
-        health.addListener { [weak self] status in
+        guard healthToken == nil, let health else { return }
+        attachedHealth = health
+        healthToken = health.addListener { [weak self] status in
             self?.status = status
         }
     }
