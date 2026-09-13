@@ -136,6 +136,10 @@ The timing log never contains transcript text, app names, or audio levels.
 | Visual motion on real displays | Hold FN at quiet, normal, and loud levels on 1× and 2× displays, with and without Reduce Motion | Pile rocks and hops with speech and settles in pauses; Reduce Motion shows a still pile with the recording dot |
 | VoiceOver | Turn on VoiceOver, start and stop a dictation, open Settings and the setup checklist | "Recording" and "Transcribing" are announced; controls have spoken labels |
 | Onboarding on a clean account | New macOS user: open the release candidate from a DMG | Checklist installs the engine and model with progress; permission step completes only after the practice dictation types text |
+| Login and multiple displays | Log out and back in; attach a second display with a different scale | VoicePop and the daemon start once; the HUD appears on the display with the pointer and renders crisply at each scale |
+| Microphone device change | Switch input devices, or unplug a USB microphone, while recording | "Audio levels unavailable" appears after ~600 ms and clears when levels return |
+| Revoked Accessibility | Turn off Voxtype in Accessibility, dictate, turn it back on | Not detectable by VoicePop; text simply isn't typed. The setup checklist can't notice this, so re-run the practice step after changing permissions |
+| macOS 13 | Run the release candidate on macOS 13 | Settings, setup checklist, and HUD work (the deployment target is 13.0; development and all measurements were on macOS 26) |
 | Microphone denied (optional, test account) | Deny Microphone for Voxtype, make two ≥ 1.5 s dictations | "Voxtype can’t hear the microphone" |
 
 ## Historical results

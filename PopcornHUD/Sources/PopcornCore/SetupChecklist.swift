@@ -93,18 +93,15 @@ public struct SetupChecklist: Equatable, Sendable {
         evidence.transcriptObserved = true
     }
 
-    /// Later evidence that dictation cannot hear or start makes earlier success stale: macOS
-    /// permissions can be revoked, and reinstalling Voxtype resets them. Returns true when
-    /// anything was cleared.
+    /// Later evidence that Voxtype lacks a permission makes earlier success stale (permissions can
+    /// be revoked). Only `permissionsNeeded` counts: an empty dictation (`noText`) is usually
+    /// silence, and a menu recording that didn't start says nothing about FN or typing. Revoked
+    /// Accessibility itself is not observable from VoicePop. Returns true when anything was cleared.
     @discardableResult
-    public mutating func invalidateEvidence(issue: DictationIssue?, failure: DictationFailure?) -> Bool {
+    public mutating func invalidateEvidence(issue: DictationIssue?) -> Bool {
         let before = evidence
         if issue == .permissionsNeeded {
             evidence.transcriptObserved = false
-            evidence.practiceInsertionObserved = false
-        }
-        if failure == .didNotStart || failure == .noText {
-            evidence.fnRecordingObserved = failure == .didNotStart ? false : evidence.fnRecordingObserved
             evidence.practiceInsertionObserved = false
         }
         return evidence != before

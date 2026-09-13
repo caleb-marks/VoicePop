@@ -58,7 +58,7 @@ final class SetupChecklistModel: ObservableObject {
                     : .needsAction(engine ? "Voxtype needs its dictation settings." : "Voxtype isn’t installed yet.")
                 self.list.model = !engine
                     ? .pending
-                    : model ? .done("The Parakeet speech model is on this Mac.") : .needsAction("The speech model isn’t downloaded yet (about 2.4 GB, one time).")
+                    : model ? .done("The speech model is on this Mac.") : .needsAction("The speech model isn’t downloaded yet. It downloads once and stays on this Mac.")
                 self.announceProgress()
                 self.startServicesIfReady()
             }
@@ -98,16 +98,17 @@ final class SetupChecklistModel: ObservableObject {
             do {
                 if !SetupAssistant.modelInstalled() {
                     DispatchQueue.main.async { self.engineOrModelChanged = true }
-                    try SetupAssistant.downloadModel { message, fraction in
+                    let target = SetupAssistant.modelToInstall()
+                    try SetupAssistant.downloadModel(target.name, activate: target.activate) { message, fraction in
                         DispatchQueue.main.async {
                             self.list.model = .working(message: message, fraction: fraction)
-                            self.health?.noteModelDownload(.init(model: SetupAssistant.modelName, fraction: fraction))
+                            self.health?.noteModelDownload(.init(model: target.name, fraction: fraction))
                         }
                     }
                 }
                 DispatchQueue.main.async {
                     self.working = false
-                    self.list.model = .done("The Parakeet speech model is on this Mac.")
+                    self.list.model = .done("The speech model is on this Mac.")
                     self.health?.noteModelDownload(nil)
                     self.health?.refresh()
                     self.announceProgress()
@@ -149,8 +150,7 @@ final class SetupChecklistModel: ObservableObject {
 
     /// Failure evidence from health, accepted at any time: it can only clear earlier success.
     func invalidate(with status: DictationStatus) {
-        let failure = status.facts.lastFailure.flatMap(DictationFailure.init(rawValue:))
-        guard list.invalidateEvidence(issue: status.issue, failure: failure) else { return }
+        guard list.invalidateEvidence(issue: status.issue) else { return }
         store.save(list.evidence)
     }
 
