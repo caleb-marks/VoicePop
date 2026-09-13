@@ -154,8 +154,8 @@ struct PopcornCapture {
         try? FileManager.default.removeItem(atPath: movieDir)
         try? FileManager.default.createDirectory(atPath: movieDir, withIntermediateDirectories: true)
         var frameIdx = 0
-        for frame in demoSequence(mascot: mascot) {
-            save(render(frame, bg: .gray, scale: 1), to: String(format: "%@/f_%04d.png", movieDir, frameIdx))
+        for (frame, hudScale) in demoSequence(mascot: mascot) {
+            save(render(frame, bg: .gray, scale: 1, hudScale: hudScale), to: String(format: "%@/f_%04d.png", movieDir, frameIdx))
             frameIdx += 1
         }
         let mp4 = "\(outDir)/\(prefix)polish.mp4"
@@ -176,8 +176,8 @@ struct PopcornCapture {
 
     /// The README demo: the documented segments at 60 fps, then the recording → transcribing
     /// collapse driven the way `HUDController` drives it, then one second of the capsule.
-    static func demoSequence(mascot: Mascot) -> [PopcornRenderer.SceneInput] {
-        var out: [PopcornRenderer.SceneInput] = []
+    static func demoSequence(mascot: Mascot) -> [(PopcornRenderer.SceneInput, Double)] {
+        var out: [(PopcornRenderer.SceneInput, Double)] = []
         let sim = PopcornSim(seed: 2026)
         sim.allowSpawn = true
         var mono: UInt64 = 0
@@ -185,28 +185,33 @@ struct PopcornCapture {
             let steps = Int(seconds * 60)
             for i in 0..<steps {
                 mono += 16
-                out.append(scene(sim.advance(toMonoMs: mono, peak: peak, peakFresh: fresh(step: i, accents: accents)), mascot: mascot))
+                out.append((scene(sim.advance(toMonoMs: mono, peak: peak, peakFresh: fresh(step: i, accents: accents)), mascot: mascot), 1))
             }
         }
         out.append(contentsOf: collapse(sim: sim, mono: &mono, mascot: mascot))
-        for _ in 0..<60 { out.append(transcribingScene(mascot: mascot)) }
+        for _ in 0..<60 { out.append((transcribingScene(mascot: mascot), capsuleHUDScale)) }
         return out
     }
 
-    /// Recording → transcribing: spawning stops and the bag collapses over `Tunables.collapseMs`.
-    static func collapse(sim: PopcornSim, mono: inout UInt64, mascot: Mascot) -> [PopcornRenderer.SceneInput] {
+    /// `HUDController`'s window scale for the frozen Transcribing capsule.
+    static let capsuleHUDScale = 0.65
+
+    /// Recording → transcribing, driven like `HUDController`: spawning stops, `bagVisible` eases
+    /// from 1 to 0 over `Tunables.collapseMs`, and the window scale eases from 1 to 0.65.
+    static func collapse(sim: PopcornSim, mono: inout UInt64, mascot: Mascot) -> [(PopcornRenderer.SceneInput, Double)] {
         sim.allowSpawn = false
-        var out: [PopcornRenderer.SceneInput] = []
+        var out: [(PopcornRenderer.SceneInput, Double)] = []
         let frames = max(1, Int((Tunables.collapseMs / 1000 * 60).rounded(.up)))
         for f in 1...frames {
             mono += 16
             let t = min(1, Double(f) / Double(frames))
-            sim.setBagVisible(1 - (1 - pow(1 - t, 3)))
+            let eased = 1 - pow(1 - t, 3)
+            sim.setBagVisible(1 - eased)
             let snap = sim.advance(toMonoMs: mono, peak: 0)
-            out.append(PopcornRenderer.SceneInput(
+            out.append((PopcornRenderer.SceneInput(
                 snapshot: snap, label: "Transcribing…", presentation: .transcribing,
                 reduceMotion: false, mascot: mascot
-            ))
+            ), 1 - (1 - capsuleHUDScale) * eased))
         }
         return out
     }
@@ -276,8 +281,8 @@ struct PopcornCapture {
         case light, dark, gray, mid, busy
     }
 
-    static func render(_ scene: PopcornRenderer.SceneInput, bg: Backdrop, scale: CGFloat) -> NSImage {
-        let view = CaptureView(scene: scene, bg: bg)
+    static func render(_ scene: PopcornRenderer.SceneInput, bg: Backdrop, scale: CGFloat, hudScale: Double = 1) -> NSImage {
+        let view = CaptureView(scene: scene, bg: bg, hudScale: hudScale)
             .frame(width: Tunables.cardW, height: Tunables.cardH)
         let renderer = ImageRenderer(content: view)
         renderer.scale = scale
@@ -316,10 +321,17 @@ struct PopcornCapture {
 struct CaptureView: View {
     var scene: PopcornRenderer.SceneInput
     var bg: PopcornCapture.Backdrop
+    /// `PopcornFrame.scale`, applied like `PopcornView`'s bottom-anchored `scaleEffect`.
+    var hudScale: Double = 1
 
     var body: some View {
         Canvas { ctx, size in
             drawBackdrop(&ctx, size: size, bg: bg)
+            if hudScale != 1 {
+                ctx.translateBy(x: size.width / 2, y: size.height)
+                ctx.scaleBy(x: hudScale, y: hudScale)
+                ctx.translateBy(x: -size.width / 2, y: -size.height)
+            }
             PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
         }
     }

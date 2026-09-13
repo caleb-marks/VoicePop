@@ -34,11 +34,11 @@ enum MotionCapture {
 
     /// Crop around the pile in scene points.
     static let heapCrop = CGRect(x: 50, y: 118, width: 160, height: 110)
-    static let pileCrop = CGRect(x: 62, y: 138, width: 136, height: 88)
+    static let pileCrop = CGRect(x: 58, y: 118, width: 144, height: 108)
 
     static func run(outDir: String) {
         try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
-        var scenes: [(phase: String, scene: PopcornRenderer.SceneInput)] = []
+        var scenes: [(phase: String, scene: PopcornRenderer.SceneInput, hudScale: Double)] = []
         var csv = "frame,phase,heat,kernels,settled"
         for i in HeapSeed.pieces.indices { csv += ",dx\(i),dy\(i),rot\(i)" }
         csv += "\n"
@@ -68,14 +68,16 @@ enum MotionCapture {
                     (peak, fresh) = speech.sample(atMonoMs: mono)
                 }
                 let snap = sim.advance(toMonoMs: mono, peak: peak, peakFresh: fresh)
-                scenes.append((phase.name, PopcornCapture.scene(snap)))
+                scenes.append((phase.name, PopcornCapture.scene(snap), 1))
                 log(phase.name, snap)
             }
         }
-        for s in PopcornCapture.collapse(sim: sim, mono: &mono, mascot: .popcorn) {
-            scenes.append(("collapse", s))
+        for (s, hudScale) in PopcornCapture.collapse(sim: sim, mono: &mono, mascot: .popcorn) {
+            scenes.append(("collapse", s, hudScale))
         }
-        for _ in 0..<30 { scenes.append(("capsule", PopcornCapture.transcribingScene(mascot: .popcorn))) }
+        for _ in 0..<30 {
+            scenes.append(("capsule", PopcornCapture.transcribingScene(mascot: .popcorn), PopcornCapture.capsuleHUDScale))
+        }
         try? csv.write(toFile: "\(outDir)/heap-trace.csv", atomically: true, encoding: .utf8)
 
         // Reduce Motion: same loud input, decorative motion suppressed.
@@ -96,13 +98,13 @@ enum MotionCapture {
         }
         let collapseFrames = scenes.enumerated().filter { $0.element.phase == "collapse" }.map(\.offset)
         let collapseStart = max(0, (collapseFrames.first ?? 0) - 24)
-        let aroundCollapse = Array(scenes[collapseStart..<min(scenes.count, collapseStart + 48)]).map(\.scene)
+        // Every frame from just before the release through the capsule (the collapse is ~6 frames).
+        let aroundCollapse = Array(scenes[(collapseStart + 16)..<min(scenes.count, collapseStart + 40)])
+        saveCollapseSheet(aroundCollapse.map { ($0.scene, $0.hudScale) }, columns: 8, to: "\(outDir)/sheet-collapse.png")
         saveSheet(window("loud", skip: 60), columns: 6, crop: heapCrop, scale: 3, to: "\(outDir)/sheet-loud.png")
         saveSheet(window("accents", skip: 30), columns: 6, crop: heapCrop, scale: 3, to: "\(outDir)/sheet-accents.png")
         saveSheet(window("pause", skip: 0, count: 60).enumerated().filter { $0.offset % 2 == 0 }.map(\.element),
                   columns: 6, crop: heapCrop, scale: 3, to: "\(outDir)/sheet-pause-every4th.png")
-        saveSheet(aroundCollapse.enumerated().filter { $0.offset % 2 == 0 }.map(\.element), columns: 6,
-                  crop: CGRect(x: 30, y: 60, width: 200, height: 330), scale: 2, to: "\(outDir)/sheet-collapse.png")
         // Pile only (airborne kernels hidden) so rocking, hops, and resting kernels are visible.
         func pileOnly(_ list: [PopcornRenderer.SceneInput]) -> [PopcornRenderer.SceneInput] {
             list.map { var s = $0; s.kernels = s.kernels.filter(\.settled); return s }
@@ -124,7 +126,7 @@ enum MotionCapture {
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         }
         for (i, s) in scenes.enumerated() {
-            PopcornCapture.save(PopcornCapture.render(s.scene, bg: .gray, scale: 2), to: String(format: "%@/f_%04d.png", framesDir, i))
+            PopcornCapture.save(PopcornCapture.render(s.scene, bg: .gray, scale: 2, hudScale: s.hudScale), to: String(format: "%@/f_%04d.png", framesDir, i))
             if let img = renderCrop(s.scene, crop: heapCrop, scale: 4) {
                 PopcornCapture.save(img, to: String(format: "%@/f_%04d.png", heapDir, i))
             }
@@ -138,6 +140,31 @@ enum MotionCapture {
                                "\(outDir)/motion-full.gif"])
         for dir in [framesDir, heapDir] { try? FileManager.default.removeItem(atPath: dir) }
         print("wrote motion captures to \(outDir) (\(scenes.count) frames)")
+    }
+
+    static func saveCollapseSheet(_ frames: [(PopcornRenderer.SceneInput, Double)], columns: Int, to path: String) {
+        let cell = CGSize(width: Tunables.cardW, height: Tunables.cardH)
+        let rows = (frames.count + columns - 1) / columns
+        let view = Canvas { ctx, size in
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.3)))
+            for (i, frame) in frames.enumerated() {
+                var c = ctx
+                let origin = CGPoint(x: CGFloat(i % columns) * (cell.width + 4), y: CGFloat(i / columns) * (cell.height + 4))
+                c.clip(to: Path(CGRect(origin: origin, size: cell)))
+                c.translateBy(x: origin.x, y: origin.y)
+                c.fill(Path(CGRect(origin: .zero, size: cell)), with: .color(Color(white: 0.92)))
+                c.translateBy(x: cell.width / 2, y: cell.height)
+                c.scaleBy(x: frame.1, y: frame.1)
+                c.translateBy(x: -cell.width / 2, y: -cell.height)
+                PopcornRenderer.drawScene(ctx: &c, scene: frame.0)
+                ctx.draw(Text("\(i)").font(.system(size: 14)).foregroundColor(.black.opacity(0.6)),
+                         at: CGPoint(x: origin.x + 6, y: origin.y + 6), anchor: .topLeading)
+            }
+        }
+        .frame(width: CGFloat(columns) * (cell.width + 4) - 4, height: CGFloat(rows) * (cell.height + 4) - 4)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        if let img = renderer.nsImage { PopcornCapture.save(img, to: path) }
     }
 
     static func renderCrop(_ scene: PopcornRenderer.SceneInput, crop: CGRect, scale: CGFloat) -> NSImage? {

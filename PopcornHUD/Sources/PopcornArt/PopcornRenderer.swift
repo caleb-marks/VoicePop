@@ -111,6 +111,21 @@ public enum PopcornRenderer {
         let cx = w / 2
 
         if scene.presentation == .transcribing || scene.bagVisible < 0.15 {
+            // Popcorn collapse (recording → transcribing): the tub and pile sink and fade into
+            // the capsule over the few frames `HUDController` drives `bagVisible` from 1 to 0,
+            // instead of vanishing on the first transcribing frame.
+            if scene.mascot == .popcorn, scene.presentation == .transcribing, !scene.reduceMotion,
+               scene.bagVisible >= 0.15 {
+                let t = CGFloat((scene.bagVisible - 0.15) / 0.85)
+                let anchorY = bagBottom - PopcornMetrics.bottomShift
+                ctx.drawLayer { layer in
+                    layer.opacity = Double(t)
+                    layer.translateBy(x: cx, y: anchorY)
+                    layer.scaleBy(x: 0.8 + 0.2 * t, y: 0.6 + 0.4 * t)
+                    layer.translateBy(x: -cx, y: -anchorY)
+                    drawBagScene(ctx: &layer, cx: cx, bagTop: bagTop, bagBottom: bagBottom, scene: scene, drawStatus: false)
+                }
+            }
             let capsuleY = scene.mascot == .popcorn
                 ? popcornCapsuleY(bagBottom: bagBottom)
                 : h - Tunables.capsuleH / 2 - 8
@@ -140,7 +155,8 @@ public enum PopcornRenderer {
         cx: CGFloat,
         bagTop: CGFloat,
         bagBottom: CGFloat,
-        scene: SceneInput
+        scene: SceneInput,
+        drawStatus: Bool = true
     ) {
         let visibleBottom = bagBottom - PopcornMetrics.bottomShift
         // Signed: positive = squash (wider, shorter); the spring's negative overshoot reads as a
@@ -184,6 +200,7 @@ public enum PopcornRenderer {
         drawBagBody(ctx: &bagCtx, cx: cx, bagTop: bagTop, bagBottom: visibleBottom, mouthSag: mouthSag, scene: scene)
 
         drawFlying(ctx: &ctx, front: true, scene: scene)
+        guard drawStatus else { return }
 
         // Status capsule
         drawCapsuleStyled(
