@@ -38,6 +38,13 @@ struct SettingsAppearanceView: View {
                 }
                 .pickerStyle(.radioGroup)
                 .accessibilityLabel("Mascot")
+                if let error = store.saveError {
+                    HStack {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        Button("Retry") { store.save() }
+                    }
+                }
             }
 
             Section("Preview") {

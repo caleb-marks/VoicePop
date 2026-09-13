@@ -63,9 +63,13 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Call after mutating `prefs` from a SwiftUI control. On failure, rolls `prefs` back to the
-    /// last known-good cached value (M-8) - otherwise Settings would keep showing an unsaved
-    /// change the menu, cache, and `voxtype-clean` never received, with no way to tell.
+    /// Call after mutating `prefs` from a SwiftUI control. On failure, keeps the attempted value
+    /// in `prefs` (so the control the user just touched doesn't silently snap back with no
+    /// explanation) and sets `saveError`, which `SettingsAppearanceView`/`SettingsDictationView`
+    /// show inline with a Retry button that just calls `save()` again (M-8 - a bare rollback with
+    /// no visible error, tried in an earlier pass, left the failure invisible: the control
+    /// reverted, but the menu, cache, and `voxtype-clean` still silently kept the old value too,
+    /// which is what a rollback alone amounts to - so review-2 correctly called that incomplete).
     func save() {
         do {
             try prefs.save()
@@ -74,7 +78,6 @@ final class SettingsStore: ObservableObject {
             NotificationCenter.default.post(name: .voicePopStylePrefsDidChange, object: ObjectIdentifier(self))
         } catch {
             saveError = error.localizedDescription
-            prefs = StylePrefsCache.current()
         }
     }
 }

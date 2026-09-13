@@ -234,8 +234,14 @@ public enum VoicePopPaths {
         }
     }
 
+    /// Chmods to 0700 only when VoicePop is the one creating the directory (L-17): before this,
+    /// every call re-chmodded whatever `url` already pointed at, so a `VOICEPOP_CONFIG_DIR`
+    /// override aimed at an existing shared directory (e.g. `$HOME`, a project folder) had its
+    /// permissions silently changed. An existing directory is left exactly as it was.
     public static func ensurePrivateDirectory(at url: URL) throws {
+        let existedBefore = FileManager.default.fileExists(atPath: url.path)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        guard !existedBefore else { return }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
 
