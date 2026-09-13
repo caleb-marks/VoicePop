@@ -89,9 +89,17 @@ struct SettingsLearnedWordsView: View {
 
             List {
                 Section {
-                    HStack {
-                        TextField("From (what you often say)", text: $newFrom)
-                        TextField("To (what it should become)", text: $newTo)
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("From").font(.caption).foregroundStyle(.secondary)
+                            TextField("what you often say", text: $newFrom)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("To").font(.caption).foregroundStyle(.secondary)
+                            TextField("what it should become", text: $newTo)
+                                .textFieldStyle(.roundedBorder)
+                        }
                         Button("Add") { add() }
                             .disabled(newFrom.isEmpty || newTo.isEmpty)
                     }
@@ -128,8 +136,10 @@ struct SettingsLearnedWordsView: View {
         if editingKey == entry.from {
             HStack {
                 TextField("From", text: $editFrom)
+                    .textFieldStyle(.roundedBorder)
                 Image(systemName: "arrow.right")
                 TextField("To", text: $editTo)
+                    .textFieldStyle(.roundedBorder)
                 Button("Save") { commitEdit(original: entry) }
                 Button("Cancel") { editingKey = nil }
             }

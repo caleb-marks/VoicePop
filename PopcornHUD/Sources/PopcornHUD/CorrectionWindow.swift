@@ -40,12 +40,21 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Reads the last dictation off the main thread (via `LastHistoryEntryCache`, usually already
+    /// warm) and presents once it returns - `history.jsonl` must never be tail-read synchronously
+    /// on the thread handling a menu click or global shortcut.
     func present() {
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {
             returnTo = front
         }
-        guard let entry = HistoryStore.last() else {
+        LastHistoryEntryCache.currentAsync { [weak self] entry in
+            self?.presentResolved(entry)
+        }
+    }
+
+    private func presentResolved(_ entry: HistoryEntry?) {
+        guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
             alert.alertStyle = .informational

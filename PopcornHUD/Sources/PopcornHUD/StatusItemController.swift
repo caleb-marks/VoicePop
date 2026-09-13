@@ -66,7 +66,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Process discovery must not block HUD startup on the main thread.
         EngineControl.scheduleMenubarSuppressRetries()
         refreshCachesIfStale(force: true)
-        refreshFixLastItem()
+        reloadFixLastItem()
+        observeTranscriptReady()
         VoxtypeWarmer.shared.ensureWarm()
     }
 
@@ -87,6 +88,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             NSStatusBar.system.removeStatusItem(item)
         }
         statusItem = nil
+        CFNotificationCenterRemoveEveryObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+    }
+
+    /// A finished transcription is exactly when "Fix Last Dictation" needs a fresh title -
+    /// cheaper and more precise than only reloading on idle transitions.
+    private func observeTranscriptReady() {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let controller = Unmanaged<StatusItemController>.fromOpaque(observer).takeUnretainedValue()
+                DispatchQueue.main.async { controller.reloadFixLastItem() }
+            },
+            VoicePopSignal.transcriptReady as CFString,
+            nil,
+            .deliverImmediately
+        )
     }
 
     // MARK: - State
@@ -130,7 +152,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         cancelMenuItem?.isHidden = !state.isHot
         cancelMenuItem?.isEnabled = state.isHot
         if !state.isHot, !state.isTranscribing {
-            refreshFixLastItem()
+            reloadFixLastItem()
         }
     }
 
@@ -287,9 +309,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         case .openSettings: SettingsWindowController.shared.show()
         case .copyLastText:
-            guard let text = HistoryStore.last()?.out else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            LastHistoryEntryCache.currentAsync { entry in
+                guard let text = entry?.out else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
         }
     }
 
@@ -323,8 +347,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshMascotIcon()
         refreshCachesIfStale()
         refreshFixLastItem()
-        // Pick up hand edits to style.json for the *next* open, off the main thread.
+        // Pick up hand edits to style.json / a dictation since the last open, off the main
+        // thread, for the *next* open (this one paints from whatever is already cached).
         StylePrefsCache.refreshAsync()
+        reloadFixLastItem()
         statusItem?.button?.toolTip = "VoicePop - \(prefs.resolve(app: targetApp).rawValue.capitalized)"
     }
 
@@ -374,13 +400,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         if OllamaWarmer.formalInEffect(prefs) { OllamaWarmer.shared.ensureWarm(prefs.llm) }
     }
+    /// Pure UI, no I/O: paints `fixLastMenuItem` from whatever `LastHistoryEntryCache` already
+    /// holds in memory. Never touches `history.jsonl` on the main thread.
     private func refreshFixLastItem() {
-        guard let out = HistoryStore.last()?.out.trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else {
+        guard let out = LastHistoryEntryCache.current()?.out.trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else {
             fixLastMenuItem?.title = "Fix Last Dictation…"
             return
         }
         let clip = out.count > 28 ? String(out.prefix(27)) + "…" : out
         fixLastMenuItem?.title = "Fix \u{201c}\(clip)\u{201d}…"
+    }
+
+    /// Re-reads `history.jsonl` off the main thread (idle transitions, transcript-ready, menu
+    /// open) and repaints once the cache updates.
+    private func reloadFixLastItem() {
+        LastHistoryEntryCache.refreshAsync { [weak self] _ in
+            self?.refreshFixLastItem()
+        }
     }
 
     @objc private func fixLastDictation() { CorrectionWindowController.shared.present() }
