@@ -135,6 +135,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         lastStatus = status
         statusMenuItem?.title = status.headline
         rebuildRecoveryItemsForSnapshot(in: menu, actions: status.actions)
+        updateRecordEnabled()
         return menu
     }
 
