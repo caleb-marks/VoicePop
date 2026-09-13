@@ -102,7 +102,10 @@ public enum Tunables {
     public static let moodReleaseRate: Double = 1.15
 
     public static let enterMs: Double = 120
-    public static let collapseMs: Double = 100
+    /// Recording → transcribing collapse. 160 ms (was 100): long enough for the tub to visibly
+    /// sink and fade into the capsule (~6 frames at 60 Hz), still a snappy dismissal. Reduce Motion
+    /// shows the capsule immediately either way.
+    public static let collapseMs: Double = 160
     public static let cleanupFade: Double = 0.120
     /// Airborne kernels falling outside the mouth start their cleanup fade this far below the
     /// lip, so strays never reach the status capsule.
@@ -153,13 +156,13 @@ public enum Tunables {
     // MARK: Pile motion (see `HeapMotion`)
 
     /// Onset rise that produces a full-strength heap hop; smaller onsets hop proportionally.
-    public static let heapHopFullRise: Double = 0.5
+    public static let heapHopFullRise: Double = 0.3
     /// Minimum time between heap hops, so only some syllables read as accents.
     public static let heapHopRefractory: Double = 0.22
     /// Launch disturbance at the crown (rim-relative y) for a full-energy pop, in pt/s at the
     /// launch point: downward recoil, outward shove, and rocking spin (rad/s).
     public static let heapLaunchDepth: Double = -34
-    public static let heapLaunchPush: Double = 10
+    public static let heapLaunchPush: Double = 6
     public static let heapLaunchRadial: Double = 14
     public static let heapLaunchSpin: Double = 1.2
     public static let heapBurstAccent: Double = 1.6
@@ -246,6 +249,12 @@ public enum HeapSeed {
         .init(dx: -16, dy: 2, s: 0.98, far: false, shape: 11, rot: 0.70, butter: 0.36),
         .init(dx: 18, dy: 3, s: 0.96, far: false, shape: 3, rot: -0.35, butter: 0.28),
         .init(dx: 0, dy: -10, s: 1.04, far: false, shape: 10, rot: 0.15, butter: 0.38),
+        // Second pass: close the last lip gaps, which open further now that pieces travel more
+        .init(dx: 1, dy: 12, s: 0.94, far: false, shape: 4, rot: -0.40, butter: 0.30),
+        .init(dx: -34, dy: 10, s: 0.90, far: false, shape: 0, rot: 0.90, butter: 0.18),
+        .init(dx: 36, dy: 10, s: 0.90, far: false, shape: 9, rot: -0.20, butter: 0.26),
+        .init(dx: -50, dy: 1, s: 0.84, far: false, shape: 6, rot: 1.30, butter: 0.22),
+        .init(dx: 50, dy: 0, s: 0.84, far: false, shape: 2, rot: -1.00, butter: 0.32),
     ]
 
     public static let pieces: [HeapPiece] = seeds

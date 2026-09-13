@@ -50,7 +50,8 @@ public enum Palette {
     public static let kernelGolden = srgb(0xEBC47E)
     public static let kernelAmber = srgb(0xC98A3E)
     public static let kernelFold = srgb(0xB47838)
-    public static let kernelButter = srgb(0xF5B535)
+    public static let kernelButter = srgb(0xF0B040)
+    public static let kernelButterGlaze = srgb(0xF2BE52)
     public static let kernelButterDeep = srgb(0xDF9320)
     public static let kernelToast = srgb(0xE0AC62)
     public static let kernelHullLight = srgb(0xA86A2E)
@@ -88,7 +89,7 @@ public enum PaletteUI {
 
     /// Scene-space light laid over every kernel silhouette: creamy upper-left, amber underside.
     public static let kernelLight = Gradient(stops: [
-        .init(color: Color(nsColor: Palette.kernelHighlight).opacity(0.36), location: 0),
+        .init(color: Color(nsColor: Palette.kernelHighlight).opacity(0.50), location: 0),
         .init(color: Color(nsColor: Palette.kernelHighlight).opacity(0.0), location: 0.42),
         .init(color: Color(nsColor: Palette.kernelAmber).opacity(0.0), location: 0.55),
         .init(color: Color(nsColor: Palette.kernelAmber).opacity(0.40), location: 1),

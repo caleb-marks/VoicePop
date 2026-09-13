@@ -455,11 +455,12 @@ final class PhysicsTests: XCTestCase {
     }
 
     func testNoUnboundedGrowth() {
+        // 30 s is ~11 kernel lifetimes at the loud ceiling; population saturates within a few.
         let sim = PopcornSim(seed: 7)
         sim.allowSpawn = true
         var mono: UInt64 = 0
         var maxCount = 0
-        for _ in 0..<(60 * 120) {
+        for _ in 0..<(30 * 120) {
             mono += 8
             _ = sim.advance(toMonoMs: mono, peak: 0.4)
             maxCount = max(maxCount, sim.kernels.count)
@@ -473,24 +474,26 @@ final class PhysicsTests: XCTestCase {
         sim.allowSpawn = true
         var mono: UInt64 = 0
         var sawSpawnAfterHalf = false
-        var countAt30s = 0
-        for i in 0..<(60 * 120) {
+        var countAtHalf = 0
+        // 30 s (was 60) with the check point at 15 s: the settled cap is reached within seconds, so
+        // the second half still proves recycling keeps pops coming.
+        for i in 0..<(30 * 120) {
             mono += 8
             let before = sim.kernels.filter { !$0.settled }.count
             _ = sim.advance(toMonoMs: mono, peak: 0.45)
             let after = sim.kernels.filter { !$0.settled }.count
-            if i == 30 * 120 {
-                countAt30s = sim.kernels.count
+            if i == 15 * 120 {
+                countAtHalf = sim.kernels.count
             }
-            if i > 30 * 120, after > before {
+            if i > 15 * 120, after > before {
                 sawSpawnAfterHalf = true
             }
             let settled = sim.kernels.filter(\.settled).count
             XCTAssertLessThanOrEqual(settled, Tunables.maxSettledKernels)
             XCTAssertLessThanOrEqual(sim.kernels.count, Tunables.maxKernels)
         }
-        XCTAssertGreaterThan(countAt30s, 0)
-        XCTAssertTrue(sawSpawnAfterHalf, "expected new airborne pops after 30s of loud input")
+        XCTAssertGreaterThan(countAtHalf, 0)
+        XCTAssertTrue(sawSpawnAfterHalf, "expected new airborne pops after 15s of loud input")
     }
 
     func testInterpolationBlendsAcrossDisplayRates() {

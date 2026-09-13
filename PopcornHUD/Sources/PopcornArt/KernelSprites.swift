@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Drawing a kernel as a dozen vector gradient fills and transparency layers cost most of the
 /// HUD's frame budget (see `PopcornCapture --bench`). Every detail that is attached to the kernel
-/// itself - lobe volume, butter glaze, folds, hull fleck, rim - is rotation-invariant, so it is
+/// itself - lobe volume, butter glaze, hull fleck, rim - is rotation-invariant, so it is
 /// painted once per shape, butter level, and variant into a small bitmap and drawn rotated.
 /// Direction-dependent light is *not* baked in: `PopcornRenderer.drawKernel` lays one scene-space
 /// gradient over the silhouette so airborne and piled kernels share the same upper-left light.
@@ -160,15 +160,20 @@ enum KernelSprites {
         (Palette.kernelGolden, 1.0, 1.0),
     ])
 
-    private static let butterGradient = gradient([
-        (Palette.kernelButter, 1.0, 0.0),
-        (Palette.kernelButter, 0.75, 0.45),
-        (Palette.kernelButter, 0.0, 1.0),
+    /// Broad glaze with a long, smooth falloff into the cream.
+    private static let glazeGradient = gradient([
+        (Palette.kernelButterGlaze, 1.0, 0.0),
+        (Palette.kernelButterGlaze, 0.85, 0.30),
+        (Palette.kernelButterGlaze, 0.45, 0.62),
+        (Palette.kernelButterGlaze, 0.12, 0.85),
+        (Palette.kernelButterGlaze, 0.0, 1.0),
     ])
 
-    private static let butterCoreGradient = gradient([
-        (Palette.kernelButterDeep, 1.0, 0.0),
-        (Palette.kernelButterDeep, 0.0, 1.0),
+    /// Small pooled drip: richer gold, still soft-edged.
+    private static let dripGradient = gradient([
+        (Palette.kernelButter, 0.9, 0.0),
+        (Palette.kernelButter, 0.55, 0.45),
+        (Palette.kernelButter, 0.0, 1.0),
     ])
 
     private static let hullGradient = gradient([
@@ -176,15 +181,17 @@ enum KernelSprites {
         (Palette.kernelHullDark, 0.8, 1.0),
     ])
 
+    /// Fill an ellipse with a radial gradient. `focus` (unit-circle coordinates) moves the
+    /// gradient's bright center off the middle to dome the shape toward that side.
     private static func fillEllipseGradient(
-        _ ctx: CGContext, _ g: CGGradient, center: CGPoint, rx: CGFloat, ry: CGFloat
+        _ ctx: CGContext, _ g: CGGradient, center: CGPoint, rx: CGFloat, ry: CGFloat, focus: CGPoint = .zero
     ) {
         ctx.saveGState()
         ctx.translateBy(x: center.x, y: center.y)
         ctx.scaleBy(x: rx, y: ry)
         ctx.addEllipse(in: CGRect(x: -1, y: -1, width: 2, height: 2))
         ctx.clip()
-        ctx.drawRadialGradient(g, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: 1, options: [])
+        ctx.drawRadialGradient(g, startCenter: focus, startRadius: 0, endCenter: .zero, endRadius: 1, options: [])
         ctx.restoreGState()
     }
 
@@ -202,58 +209,56 @@ enum KernelSprites {
         // Lobe puffs, largest first so small lobes sit on top as separate florets. Each lobe casts
         // a soft, offset-free occlusion shadow onto the lobes beneath it: the seams between
         // florets darken gently instead of being drawn as crease lines.
-        let occlusionBlur = 0.10 * CGFloat(ctx.ctm.a)
+        let occlusionBlur = 0.13 * CGFloat(ctx.ctm.a)
         for lobe in lobes.sorted(by: { $0.rx * $0.ry > $1.rx * $1.ry }) {
             ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: occlusionBlur, color: color(Palette.kernelAmber, 0.50))
+            ctx.setShadow(offset: .zero, blur: occlusionBlur, color: color(Palette.kernelAmber, 0.42))
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            // Each floret domes outward from the kernel's middle: brightest toward its outer side,
+            // deeper where it tucks into the kernel. Tied to the kernel, so it rotates with it.
+            let len = max(0.05, hypot(lobe.x, lobe.y))
+            let focus = CGPoint(x: lobe.x / len * 0.28, y: lobe.y / len * 0.28)
             fillEllipseGradient(
                 ctx, lobeGradient, center: CGPoint(x: lobe.x, y: lobe.y),
-                rx: lobe.rx * 1.06, ry: lobe.ry * 1.06
+                rx: lobe.rx * 1.14, ry: lobe.ry * 1.14, focus: focus
             )
             ctx.endTransparencyLayer()
             ctx.restoreGState()
         }
 
-        // Butter glaze: multiply keeps the lobe modelling underneath while saturating it gold.
+        // Butter: a broad, soft golden glaze that melts into the cream (multiply keeps the lobe
+        // modelling underneath), plus a couple of small richer drips where butter pooled at a
+        // seam on the more buttered kernels. No hard-edged or rust-colored cores.
         ctx.setBlendMode(.multiply)
-        let patchCount = min(lobes.count, 1 + (level >= 2 ? 1 : 0) + (level >= 4 ? 1 : 0))
-        let strength = 0.36 + 0.11 * CGFloat(level)
+        let patchCount = min(lobes.count, 1 + (level >= 1 ? 1 : 0) + (level >= 3 ? 1 : 0))
+        let glaze = 0.34 + 0.10 * CGFloat(level)
         for i in 0..<patchCount {
             let lobe = lobes[(variant + shape + i * 2) % lobes.count]
             let angle = Double(variant * 2 + shape + i) * 1.9
             let center = CGPoint(
-                x: lobe.x + lobe.rx * 0.28 * CGFloat(cos(angle)),
-                y: lobe.y + lobe.ry * 0.28 * CGFloat(sin(angle))
+                x: lobe.x + lobe.rx * 0.22 * CGFloat(cos(angle)),
+                y: lobe.y + lobe.ry * 0.22 * CGFloat(sin(angle))
             )
-            let a = strength * (i == 0 ? 1 : 0.8)
             ctx.saveGState()
-            ctx.setAlpha(a)
-            fillEllipseGradient(ctx, butterGradient, center: center, rx: lobe.rx * 0.66, ry: lobe.ry * 0.56)
-            ctx.setAlpha(a * 0.18)
-            fillEllipseGradient(ctx, butterCoreGradient, center: center, rx: lobe.rx * 0.34, ry: lobe.ry * 0.28)
+            ctx.setAlpha(glaze * (i == 0 ? 1 : 0.75))
+            fillEllipseGradient(ctx, glazeGradient, center: center, rx: lobe.rx * 0.88, ry: lobe.ry * 0.78)
             ctx.restoreGState()
         }
-
-        // Soft folds: the outer part of each crease only, so no stitched "Y" meets in the middle.
-        ctx.setLineCap(.round)
-        for fold in KernelArt.folds(shape: shape) {
-            let path = CGMutablePath()
-            let steps = 8
-            for j in 0...steps {
-                let t = 0.45 + 0.45 * Double(j) / Double(steps)
-                let p = fold.point(at: t)
-                if j == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        if level >= 2 {
+            for d in 0..<(level >= 4 ? 2 : 1) {
+                let lobe = lobes[(variant + shape + d * 3 + 1) % lobes.count]
+                let angle = Double(shape * 3 + variant + d * 2) * 2.3
+                let edge = CGPoint(
+                    x: lobe.x + lobe.rx * 0.62 * CGFloat(cos(angle)),
+                    y: lobe.y + lobe.ry * 0.62 * CGFloat(sin(angle))
+                )
+                ctx.saveGState()
+                ctx.setAlpha(0.30 + 0.05 * CGFloat(level))
+                fillEllipseGradient(ctx, dripGradient, center: edge, rx: lobe.rx * 0.26, ry: lobe.ry * 0.34)
+                ctx.restoreGState()
             }
-            ctx.addPath(path)
-            ctx.setStrokeColor(color(Palette.kernelFold, 0.10))
-            ctx.setLineWidth(0.13)
-            ctx.strokePath()
-            ctx.addPath(path)
-            ctx.setStrokeColor(color(Palette.kernelFold, 0.12))
-            ctx.setLineWidth(0.05)
-            ctx.strokePath()
         }
+
         ctx.setBlendMode(.normal)
 
         // Small hull fleck on a third of the kernels.
@@ -281,13 +286,13 @@ enum KernelSprites {
         ctx.setLineWidth(0.22)
         ctx.strokePath()
         ctx.addPath(outline)
-        ctx.setStrokeColor(color(Palette.kernelAmber, 0.22))
+        ctx.setStrokeColor(color(Palette.kernelAmber, 0.16))
         ctx.setLineWidth(0.08)
         ctx.strokePath()
         ctx.restoreGState()
 
         ctx.addPath(outline)
-        ctx.setStrokeColor(color(Palette.kernelEdge, 0.30))
+        ctx.setStrokeColor(color(Palette.kernelEdge, 0.22))
         ctx.setLineWidth(0.035)
         ctx.strokePath()
     }
