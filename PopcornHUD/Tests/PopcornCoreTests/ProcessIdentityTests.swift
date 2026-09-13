@@ -105,3 +105,52 @@ final class DaemonIdentityTests: XCTestCase {
         XCTAssertFalse(pids.contains(ProcessInfo.processInfo.processIdentifier))
     }
 }
+
+final class DaemonRestartTests: XCTestCase {
+    private let bundle = "/Applications/Voxtype.app"
+
+    func testRestartRefusesWhenADaemonRunsFromAnotherInstall() {
+        let brew = DaemonProcess.restartPlan(
+            liveDaemons: [(101, "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"), (202, "/opt/homebrew/Cellar/voxtype/1.0.1/bin/voxtype")],
+            bundlePath: bundle
+        )
+        XCTAssertEqual(brew, .refuse(foreignPath: "/opt/homebrew/Cellar/voxtype/1.0.1/bin/voxtype"))
+        XCTAssertEqual(DaemonProcess.restartPlan(liveDaemons: [(7, "/Users/me/Applications/Voxtype.app/Contents/MacOS/voxtype-bin")], bundlePath: bundle),
+                       .refuse(foreignPath: "/Users/me/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"))
+        // A look-alike bundle name is not the bundle.
+        XCTAssertEqual(DaemonProcess.restartPlan(liveDaemons: [(8, "/Applications/Voxtype.app2/voxtype-bin")], bundlePath: bundle),
+                       .refuse(foreignPath: "/Applications/Voxtype.app2/voxtype-bin"))
+    }
+
+    func testRestartTerminatesBundleDaemonsOrNothing() {
+        XCTAssertEqual(DaemonProcess.restartPlan(liveDaemons: [], bundlePath: bundle), .terminate([]))
+        XCTAssertEqual(DaemonProcess.restartPlan(
+            liveDaemons: [(101, "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin"), (102, "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin")],
+            bundlePath: bundle + "/"
+        ), .terminate([101, 102]))
+    }
+
+    private func spawn(_ exe: String, _ args: [String]) throws -> Process {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        try p.run()
+        usleep(100_000) // let bash install its trap
+        return p
+    }
+
+    func testTerminateStopsFixtureProcessesAndEscalatesToKill() throws {
+        let polite = try spawn("/bin/sleep", ["30"])
+        let stubborn = try spawn("/bin/bash", ["-c", "trap '' TERM; while :; do sleep 0.05; done"])
+        defer { [polite, stubborn].forEach { if $0.isRunning { $0.terminate() } } }
+        let start = Date()
+        let survivors = DaemonProcess.terminate([polite.processIdentifier, stubborn.processIdentifier], grace: 0.3, killWait: 1)
+        XCTAssertEqual(survivors, [])
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+        polite.waitUntilExit()
+        stubborn.waitUntilExit()
+        XCTAssertEqual(polite.terminationReason, .uncaughtSignal)
+        XCTAssertEqual(stubborn.terminationStatus, SIGKILL, "TERM was ignored, so KILL was required")
+        XCTAssertEqual(DaemonProcess.terminate([]), [])
+    }
+}

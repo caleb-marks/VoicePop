@@ -69,12 +69,54 @@ public enum DaemonProcess {
 
     /// Live Voxtype daemon processes, whatever their install location and PID file state.
     public static func liveDaemonPIDs() -> [Int32] {
-        ProcessIdentity.allPIDs().filter { pid in
+        liveDaemons().map(\.pid)
+    }
+
+    public static func liveDaemons() -> [(pid: Int32, path: String)] {
+        ProcessIdentity.allPIDs().compactMap { pid in
             guard let path = ProcessIdentity.executablePath(pid: pid), isVoxtypeExecutable(path),
-                  let args = ProcessIdentity.arguments(pid: pid)
-            else { return false }
-            return isDaemonInvocation(args)
+                  let args = ProcessIdentity.arguments(pid: pid), isDaemonInvocation(args)
+            else { return nil }
+            return (pid, path)
         }
+    }
+
+    public enum RestartPlan: Equatable {
+        /// Stop these daemons (all from the app bundle VoicePop relaunches), then relaunch.
+        case terminate([Int32])
+        /// A daemon from another install is running; relaunching the bundle would start a second one.
+        case refuse(foreignPath: String)
+    }
+
+    /// Restart relaunches `bundlePath` (e.g. /Applications/Voxtype.app). Daemons from anywhere else
+    /// (Homebrew, a dev build) are left alone and the restart is refused, so FN never types twice.
+    public static func restartPlan(liveDaemons: [(pid: Int32, path: String)], bundlePath: String) -> RestartPlan {
+        let bundle = (bundlePath as NSString).standardizingPath + "/"
+        if let foreign = liveDaemons.first(where: { !($0.path as NSString).standardizingPath.hasPrefix(bundle) }) {
+            return .refuse(foreignPath: foreign.path)
+        }
+        return .terminate(liveDaemons.map(\.pid))
+    }
+
+    /// SIGTERM each PID, wait up to `grace`, then SIGKILL survivors and wait up to `killWait`.
+    /// Blocking; call off main. Returns PIDs still alive afterwards.
+    @discardableResult
+    public static func terminate(_ pids: [Int32], grace: TimeInterval = 3, killWait: TimeInterval = 1) -> [Int32] {
+        func alive(_ list: [Int32]) -> [Int32] { list.filter { kill($0, 0) == 0 } }
+        func waitGone(_ list: [Int32], _ seconds: TimeInterval) -> [Int32] {
+            let deadline = Date().addingTimeInterval(seconds)
+            var remaining = alive(list)
+            while !remaining.isEmpty, Date() < deadline {
+                usleep(20_000)
+                remaining = alive(remaining)
+            }
+            return remaining
+        }
+        let targets = pids.filter { $0 > 1 }
+        targets.forEach { kill($0, SIGTERM) }
+        let stubborn = waitGone(targets, grace)
+        stubborn.forEach { kill($0, SIGKILL) }
+        return waitGone(stubborn, killWait)
     }
 
     public static func isLive(pidPath: String = Paths.pid) -> Bool {
