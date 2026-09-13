@@ -40,17 +40,30 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Reads the last dictation off the main thread (via `LastHistoryEntryCache`, usually already
-    /// warm) and presents once it returns - `history.jsonl` must never be tail-read synchronously
-    /// on the thread handling a menu click or global shortcut.
+    /// Reads the last dictation off the main thread and presents once it returns -
+    /// `history.jsonl` must never be tail-read synchronously on the thread handling a menu click
+    /// or global shortcut. Forces a fresh re-read (`refreshAsync`, not `currentAsync`) rather than
+    /// trusting whatever is cached: the cache can still be one dictation behind right after the
+    /// transcript-ready signal (L-4, `voxtype-clean` posts it before appending to
+    /// `history.jsonl`), and this is a deliberate, infrequent user action where the extra disk
+    /// read is cheap and correctness matters more than avoiding it.
     func present() {
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {
             returnTo = front
         }
-        LastHistoryEntryCache.currentAsync { [weak self] entry in
+        LastHistoryEntryCache.refreshAsync { [weak self] entry in
             self?.presentResolved(entry)
         }
+    }
+
+    /// True once the text view has been edited away from the presented entry's original text (or
+    /// a save attempt already failed, which - since `CorrectionSaver.save` only ever runs on a
+    /// change from the original - implies the same thing). Used to decide whether re-presenting a
+    /// *different* entry needs to confirm before discarding (M-2).
+    private var hasUnsavedEdits: Bool {
+        guard built, let entry else { return false }
+        return (textView?.string ?? "") != entry.out
     }
 
     private func presentResolved(_ entry: HistoryEntry?) {
@@ -62,6 +75,26 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
             alert.runModal()
             returnFocus()
             return
+        }
+        // Same entry already open: just bring it forward. Resetting here (the old behavior)
+        // discarded in-progress edits and, worse, replaced `saver` - so a Retry after a save
+        // failure lost track of what it had already appended and could duplicate the
+        // corrections.jsonl record (M-2).
+        if built, let window, window.isVisible, self.entry?.ts == entry.ts {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            return
+        }
+        if hasUnsavedEdits {
+            let alert = NSAlert()
+            alert.messageText = "Discard unsaved correction?"
+            alert.informativeText = "Fixing a newer dictation will discard your unsaved edits to the previous one."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Discard and Continue")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         self.entry = entry
         self.saver = CorrectionSaver()

@@ -95,7 +95,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// A finished transcription is exactly when "Fix Last Dictation" needs a fresh title -
-    /// cheaper and more precise than only reloading on idle transitions.
+    /// cheaper and more precise than only reloading on idle transitions. `voxtype-clean` posts
+    /// this signal *before* it appends to `history.jsonl` (it's primarily the HUD's dismiss cue),
+    /// so an immediate reload can race the append and read the previous entry (L-4); reload once
+    /// right away in case it already landed, and again shortly after to pick it up if not.
     private func observeTranscriptReady() {
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
@@ -103,7 +106,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             { _, observer, _, _, _ in
                 guard let observer else { return }
                 let controller = Unmanaged<StatusItemController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { controller.reloadFixLastItem() }
+                DispatchQueue.main.async {
+                    controller.reloadFixLastItem()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        controller.reloadFixLastItem()
+                    }
+                }
             },
             VoicePopSignal.transcriptReady as CFString,
             nil,
@@ -140,7 +148,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.insertItem(item, at: insertAt)
             insertAt += 1
         }
-        separator.isHidden = actions.isEmpty
     }
 
     private func apply(state: DaemonState) {
@@ -151,6 +158,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         recordMenuItem?.title = state.isHot ? "Stop Recording" : "Start Recording"
         cancelMenuItem?.isHidden = !state.isHot
         cancelMenuItem?.isEnabled = state.isHot
+        updateRecordEnabled()
         if !state.isHot, !state.isTranscribing {
             reloadFixLastItem()
         }
@@ -169,6 +177,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             detailMenuItem?.isHidden = true
         }
         rebuildRecoveryItems(for: status.actions)
+        updateRecordEnabled()
+    }
+
+    /// Start Recording does nothing useful when dictation can't currently start (L-10) - offering
+    /// it anyway while e.g. the engine isn't running invites a click that has no effect.
+    /// Stop Recording (the same item, while hot) is always meaningful, so hot always enables it.
+    private func updateRecordEnabled() {
+        recordMenuItem?.isEnabled = lastState.isHot || lastStatus.canDictate
     }
 
     private static func styleTitle(_ style: Style) -> String {
@@ -195,13 +211,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         detailMenuItem = detail
         menu.addItem(detail)
 
-        // Recovery items are inserted here dynamically, followed by their own separator.
+        // Recovery items are inserted here dynamically. This one separator always divides the
+        // status/recovery section from the record controls below, whether or not any recovery
+        // items are present - it must never be hidden itself (that used to leave it and the
+        // static separator that followed it both visible back to back, a doubled divider line
+        // whenever a recovery action was showing).
         let recoverySep = NSMenuItem.separator()
-        recoverySep.isHidden = true
         recoverySeparator = recoverySep
         menu.addItem(recoverySep)
-
-        menu.addItem(.separator())
 
         let record = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "")
         recordMenuItem = record
@@ -283,7 +300,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             recoveryItems.append(item)
             insertAt += 1
         }
-        recoverySeparator?.isHidden = actions.isEmpty
     }
 
     private func title(for action: RecoveryAction) -> String {
@@ -405,8 +421,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func refreshFixLastItem() {
         guard let out = LastHistoryEntryCache.current()?.out.trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else {
             fixLastMenuItem?.title = "Fix Last Dictation…"
+            // Disable only once the cache is confirmed empty (L-10), not merely because nothing
+            // has loaded yet - the item stays enabled (and shows the "Nothing to fix yet" alert
+            // if clicked) while that's still unknown, rather than guessing.
+            fixLastMenuItem?.isEnabled = !LastHistoryEntryCache.isKnownEmpty()
             return
         }
+        fixLastMenuItem?.isEnabled = true
         let clip = out.count > 28 ? String(out.prefix(27)) + "…" : out
         fixLastMenuItem?.title = "Fix \u{201c}\(clip)\u{201d}…"
     }

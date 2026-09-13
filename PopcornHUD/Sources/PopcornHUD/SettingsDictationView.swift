@@ -47,11 +47,14 @@ struct SettingsDictationView: View {
                             get: { store.prefs.perApp[app] ?? .auto },
                             set: { store.prefs.perApp[app] = $0; store.save() }
                         )) {
+                            // A hand-set .auto per-app override (or one this list itself no
+                            // longer manages a case for) otherwise shows no selection at all (N-4).
+                            Text("Automatic").tag(Style.auto)
                             Text("Casual").tag(Style.casual)
                             Text("Formal").tag(Style.formal)
                         }
                         .labelsHidden()
-                        .frame(width: 100)
+                        .frame(width: 120)
                         Button(role: .destructive) {
                             store.prefs.perApp.removeValue(forKey: app)
                             store.save()
@@ -102,7 +105,13 @@ struct SettingsDictationView: View {
                 Text(choice.summary).font(.caption).foregroundStyle(.secondary)
                 Text(String(format: "~%.1f GB", choice.approxSizeGB)).font(.caption2).foregroundStyle(.tertiary)
                 if models.downloadingID == choice.id {
-                    ProgressView(value: models.downloadFraction ?? 0)
+                    // An indeterminate ProgressView() while fraction is unknown, instead of a
+                    // determinate bar frozen at 0% (N-4).
+                    if let fraction = models.downloadFraction {
+                        ProgressView(value: fraction)
+                    } else {
+                        ProgressView()
+                    }
                     Text(models.downloadMessage).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -129,6 +138,12 @@ final class ModelListViewModel: ObservableObject {
     /// Harness-only: true when this instance was pre-seeded with fixture state, so `onAppear`
     /// doesn't immediately overwrite it by probing the live engine.
     var skipAutoRefresh = false
+    /// Read lazily (like `SettingsStore.attachHealthIfNeeded`, L-1) rather than captured at init,
+    /// so a Settings window built before `AppDelegate` sets `health` still reports downloads once
+    /// it's available. `INTERFACES.md` #6: Settings downloads must report to
+    /// `health.noteModelDownload` (M-6) so the menu headline shows "Downloading speech model… N%"
+    /// instead of staying "Ready" during a Settings-initiated download.
+    var health: DictationHealthMonitor? { SettingsWindowController.shared.health }
 
     func refresh() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -160,6 +175,7 @@ final class ModelListViewModel: ObservableObject {
             downloadingID = id
             downloadFraction = nil
             downloadMessage = "Downloading…"
+            health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: nil))
         }
         let runner = self.runner
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -172,6 +188,7 @@ final class ModelListViewModel: ObservableObject {
                             case .progress(let fraction, let bytesGB, let totalGB):
                                 self.downloadFraction = fraction
                                 self.downloadMessage = String(format: "Downloading… %.1f of %.1f GB", bytesGB, totalGB)
+                                self.health?.noteModelDownload(EngineFacts.Download(model: catalogID, fraction: fraction))
                             case .failure(let message):
                                 self.failure = message
                             }
@@ -184,6 +201,8 @@ final class ModelListViewModel: ObservableObject {
                     self.downloadingID = nil
                     self.installed.insert(id)
                     self.current = id
+                    // Completed: clear the download indicator health reports through the menu.
+                    self.health?.noteModelDownload(nil)
                     EngineControl.restart()
                 }
             } catch {
@@ -191,6 +210,9 @@ final class ModelListViewModel: ObservableObject {
                     guard let self else { return }
                     self.downloadingID = nil
                     self.failure = error.localizedDescription
+                    // Failed: also clear it, rather than leaving the menu showing a download
+                    // that is no longer happening.
+                    self.health?.noteModelDownload(nil)
                 }
             }
         }

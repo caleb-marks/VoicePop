@@ -187,26 +187,15 @@ struct SettingsLearnedWordsView: View {
 final class LearnedWordsViewModel: ObservableObject {
     enum LoadState { case ready, malformed }
 
-    /// A user edit, replayed against a freshly re-read copy of the file at save time (M-1) -
-    /// never against whatever this view model loaded when the tab first appeared. That is what
-    /// lets a save merge with entries the correction window learned in the meantime instead of
-    /// silently erasing them, and refuse instead of overwriting a file that became malformed
-    /// after this tab's own load.
-    private enum Mutation {
-        case add(Replacement)
-        case update(originalFrom: String, from: String, to: String)
-        case delete(from: String)
-    }
-
     @Published var entries: [Replacement] = []
     @Published var loadState: LoadState = .ready
     @Published var saveError: String?
     @Published var quarantineError: String?
 
     /// Only for validation feedback in the UI and for `filtered`/row display between saves - the
-    /// save path itself always re-reads the file (see `Mutation`).
+    /// save path itself always re-reads the file (see `persistMutation`).
     private var replacements = Replacements()
-    private var lastMutation: Mutation?
+    private var lastMutation: Replacements.Mutation?
 
     func load() {
         switch Replacements.inspect() {
@@ -297,7 +286,7 @@ final class LearnedWordsViewModel: ObservableObject {
     /// Re-inspects the file, refuses (with an error, keeping the in-UI edit) if it is missing-then
     /// -corrupted or corrupt, otherwise replays `mutation` on top of whatever is actually on disk
     /// right now and saves that - never the possibly-stale copy this view model loaded earlier.
-    private func persistMutation(_ mutation: Mutation) {
+    private func persistMutation(_ mutation: Replacements.Mutation) {
         lastMutation = mutation
         var fresh: Replacements
         switch Replacements.inspect() {
@@ -309,7 +298,7 @@ final class LearnedWordsViewModel: ObservableObject {
         case .ready(let r):
             fresh = r
         }
-        apply(mutation, to: &fresh)
+        fresh.apply(mutation)
         do {
             try fresh.save()
             replacements = fresh
@@ -317,26 +306,6 @@ final class LearnedWordsViewModel: ObservableObject {
             saveError = nil
         } catch {
             saveError = "Couldn\u{2019}t save learned words. \(error.localizedDescription)"
-        }
-    }
-
-    private func apply(_ mutation: Mutation, to r: inout Replacements) {
-        switch mutation {
-        case .add(let entry):
-            if let idx = r.entries.firstIndex(where: { $0.from == entry.from }) {
-                r.entries[idx] = entry
-            } else {
-                r.entries.append(entry)
-            }
-        case .update(let originalFrom, let from, let to):
-            if let idx = r.entries.firstIndex(where: { $0.from == originalFrom }) {
-                r.entries[idx].from = from
-                r.entries[idx].to = to
-            } else {
-                r.entries.append(Replacement(from: from, to: to, count: 1, lastTs: ISO8601DateFormatter().string(from: Date())))
-            }
-        case .delete(let from):
-            r.entries.removeAll { $0.from == from }
         }
     }
 }

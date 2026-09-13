@@ -110,11 +110,21 @@ public enum LastHistoryEntryCache {
     private static var generation: UInt64 = 0
 
     /// Cached value only - never touches disk. `nil` both "no dictation yet" and "not loaded
-    /// yet"; callers that must tell those apart use `currentAsync`.
+    /// yet"; callers that must tell those apart use `currentAsync` or `isKnownEmpty`.
     public static func current() -> HistoryEntry? {
         lock.lock()
         defer { lock.unlock() }
         return cached
+    }
+
+    /// True once the cache has been loaded at least once and confirmed there is no history entry
+    /// - as opposed to `current() == nil`, which is also true before the first load ever
+    /// completes. Lets a caller (L-10: "Fix Last Dictation") disable itself only once it is
+    /// certain there is truly nothing to fix, not merely because nothing has loaded yet.
+    public static func isKnownEmpty() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return loaded && cached == nil
     }
 
     /// Delivers the cached value on the main queue immediately if it has been loaded at least
@@ -326,6 +336,43 @@ public struct Replacements: Codable, Equatable {
             if DiffLearner.key(e.from) == key { return .duplicateFrom }
         }
         return nil
+    }
+
+    /// A single Learned Words edit, replayable against any `Replacements` value - in particular a
+    /// freshly re-read one, not necessarily the one the edit was made against (see `apply`).
+    public enum Mutation: Equatable {
+        case add(Replacement)
+        case update(originalFrom: String, from: String, to: String)
+        case delete(from: String)
+    }
+
+    /// Applies `mutation` in place. Used to replay a Settings edit against the file's current
+    /// on-disk state at save time instead of a possibly-stale in-memory copy (review-1 M-1): a
+    /// Settings session that loaded the file, then had the correction window learn new words
+    /// into it, then edits and saves, must not silently erase those new words by writing back
+    /// its stale snapshot. `add`/`update` overwrite-in-place (by `from` key) rather than
+    /// duplicating if the target key already exists (e.g. re-saving an unchanged add).
+    public mutating func apply(_ mutation: Mutation, now: Date = Date()) {
+        switch mutation {
+        case .add(let entry):
+            if let idx = entries.firstIndex(where: { $0.from == entry.from }) {
+                entries[idx] = entry
+            } else {
+                entries.append(entry)
+            }
+        case .update(let originalFrom, let from, let to):
+            if let idx = entries.firstIndex(where: { $0.from == originalFrom }) {
+                entries[idx].from = from
+                entries[idx].to = to
+            } else {
+                // The entry being edited was deleted or renamed concurrently (e.g. by another
+                // process editing the file) - add it back under the edited key rather than
+                // silently dropping the user's edit.
+                entries.append(Replacement(from: from, to: to, count: 1, lastTs: Self.iso8601.string(from: now)))
+            }
+        case .delete(let from):
+            entries.removeAll { $0.from == from }
+        }
     }
 
     public enum LoadResult: Equatable {
