@@ -100,6 +100,70 @@ public enum HistoryStore {
     }
 }
 
+/// Process-wide cache of `HistoryStore.last()`, so the menu (opened often, and on every idle
+/// transition) and "Fix Last Dictation"/"Copy Last Text" never do a synchronous `history.jsonl`
+/// tail-read on the main thread. Mirrors `StylePrefsCache`'s generation-guarded refresh pattern.
+public enum LastHistoryEntryCache {
+    private static let lock = NSLock()
+    private static var cached: HistoryEntry?
+    private static var loaded = false
+    private static var generation: UInt64 = 0
+
+    /// Cached value only - never touches disk. `nil` both "no dictation yet" and "not loaded
+    /// yet"; callers that must tell those apart use `currentAsync`.
+    public static func current() -> HistoryEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cached
+    }
+
+    /// Delivers the cached value on the main queue immediately if it has been loaded at least
+    /// once; otherwise loads off-main first. Use for a one-off action (Copy Last Text) where the
+    /// cache might still be cold (e.g. right after launch).
+    public static func currentAsync(completion: @escaping (HistoryEntry?) -> Void) {
+        lock.lock()
+        let isLoaded = loaded
+        let value = cached
+        lock.unlock()
+        if isLoaded {
+            DispatchQueue.main.async { completion(value) }
+        } else {
+            refreshAsync(completion: completion)
+        }
+    }
+
+    /// Re-reads `history.jsonl` off the main thread and updates the cache; safe to call often
+    /// (idle transitions, a transcript-ready signal). `completion`, if given, always runs on main.
+    public static func refreshAsync(completion: ((HistoryEntry?) -> Void)? = nil) {
+        lock.lock()
+        generation &+= 1
+        let stamp = generation
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let value = HistoryStore.last()
+            lock.lock()
+            if generation == stamp {
+                cached = value
+                loaded = true
+            }
+            let result = cached
+            lock.unlock()
+            if let completion { DispatchQueue.main.async { completion(result) } }
+        }
+    }
+
+    /// Synchronously marks the cache empty-and-loaded. Call right after `HistoryStore.clear()`
+    /// succeeds (L-3): the caller already knows for a fact there is nothing left, so this is pure
+    /// bookkeeping, not a disk read, and is safe on the main thread.
+    public static func clear() {
+        lock.lock()
+        generation &+= 1
+        cached = nil
+        loaded = true
+        lock.unlock()
+    }
+}
+
 /// Reads only the tail of a growing JSONL file. A partial first line is dropped, which is
 /// safe because callers only ever want whole trailing records.
 enum TailReader {
@@ -136,17 +200,23 @@ public struct CorrectionEntry: Codable, Equatable {
 public enum CorrectionStore {
     public static func append(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) {
         do {
-            try VoicePopPaths.ensureDir()
-            try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
-            let data = try JSONEncoder().encode(e) + Data("\n".utf8)
-            let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-            guard fd >= 0 else { throw AppendError.openFailed(errno) }
-            defer { close(fd) }
-            guard fchmod(fd, 0o600) == 0 else { throw AppendError.writeFailed(errno) }
-            try appendAll(fd: fd, data: data)
+            try appendThrowing(e, to: url)
         } catch {
             fputs("VoicePop: corrections append failed: \(error)\n", stderr)
         }
+    }
+
+    /// Throwing sibling of `append`, for callers (the correction window) that must show the user
+    /// an actionable error instead of silently swallowing it.
+    public static func appendThrowing(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) throws {
+        try VoicePopPaths.ensureDir()
+        try VoicePopPaths.ensurePrivateDirectory(at: url.deletingLastPathComponent())
+        let data = try JSONEncoder().encode(e) + Data("\n".utf8)
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { throw AppendError.openFailed(errno) }
+        defer { close(fd) }
+        guard fchmod(fd, 0o600) == 0 else { throw AppendError.writeFailed(errno) }
+        try appendAll(fd: fd, data: data)
     }
 
     public static func recent(limit: Int, from url: URL = VoicePopPaths.corrections) -> [CorrectionEntry] {
@@ -163,12 +233,53 @@ public struct Replacement: Codable, Equatable {
     public var to: String
     public var count: Int
     public var lastTs: String
+    /// Per-entry keys this version does not recognize, preserved on save.
+    public var unknownFields: [String: JSONValue] = [:]
 
     public init(from: String, to: String, count: Int, lastTs: String) {
         self.from = from
         self.to = to
         self.count = count
         self.lastTs = lastTs
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case from, to, count, lastTs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.from = try c.decode(String.self, forKey: .from)
+        self.to = try c.decode(String.self, forKey: .to)
+        self.count = try c.decode(Int.self, forKey: .count)
+        self.lastTs = try c.decode(String.self, forKey: .lastTs)
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(from, forKey: .from)
+        try c.encode(to, forKey: .to)
+        try c.encode(count, forKey: .count)
+        try c.encode(lastTs, forKey: .lastTs)
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
+    }
+}
+
+/// Validation error for a Learned Words edit, surfaced verbatim in the Settings UI.
+public enum ReplacementValidationError: Error, LocalizedError, Equatable {
+    case fromTooShort
+    case toEmpty
+    case fromEqualsTo
+    case duplicateFrom
+
+    public var errorDescription: String? {
+        switch self {
+        case .fromTooShort: return "The original word or phrase must be at least 2 characters."
+        case .toEmpty: return "The replacement text can't be empty."
+        case .fromEqualsTo: return "The replacement must be different from the original."
+        case .duplicateFrom: return "That word or phrase is already learned. Edit the existing entry instead."
+        }
     }
 }
 
@@ -177,8 +288,45 @@ public struct Replacements: Codable, Equatable {
 
     public var version = 1
     public var entries: [Replacement] = []
+    /// Top-level keys this version does not recognize, preserved on save.
+    public var unknownFields: [String: JSONValue] = [:]
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case version, entries
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        entries = try c.decodeIfPresent([Replacement].self, forKey: .entries) ?? []
+        unknownFields = UnknownFieldCapture.extra(from: decoder, knownKeys: CodingKeys.allCases.map(\.stringValue))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(entries, forKey: .entries)
+        try UnknownFieldCapture.encode(unknownFields, to: encoder)
+    }
+
+    /// Validates a Learned Words edit against the same rules `apply` uses at runtime, so an entry
+    /// that would be silently ineffective is instead rejected in the UI. `excluding` is the
+    /// existing entry's `from` key when editing in place (so it isn't flagged as its own duplicate).
+    public static func validate(from: String, to: String, existing: [Replacement], excluding: String? = nil) -> ReplacementValidationError? {
+        let trimmedFrom = from.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTo = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedFrom.count >= 2 else { return .fromTooShort }
+        guard !trimmedTo.isEmpty else { return .toEmpty }
+        guard trimmedFrom.caseInsensitiveCompare(trimmedTo) != .orderedSame else { return .fromEqualsTo }
+        let key = DiffLearner.key(trimmedFrom)
+        for e in existing {
+            if let excluding, DiffLearner.key(excluding) == key { continue }
+            if DiffLearner.key(e.from) == key { return .duplicateFrom }
+        }
+        return nil
+    }
 
     public enum LoadResult: Equatable {
         case missing
@@ -373,5 +521,88 @@ public enum DiffLearner {
         }
         emit(from: typed[ti...], to: corrected[ci...])
         return result
+    }
+}
+
+/// Testable save logic for the correction window (§4): appends a `corrections.jsonl` record and
+/// learns replacements from an edited transcript. Injectable URLs so tests never touch real
+/// config. One instance per open correction window: it remembers which (entry, edited-text) pair
+/// it already appended, so retrying after a failure never writes a duplicate `corrections.jsonl`
+/// record even though `learn`/`save` may be retried.
+public final class CorrectionSaver {
+    public enum SaveError: Error, LocalizedError, Equatable {
+        case correctionAppendFailed(String)
+        case replacementsCorrupt
+        case replacementsQuarantineFailed(String)
+        case replacementsSaveFailed(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .correctionAppendFailed(let detail):
+                return "Couldn't save the correction. \(detail)"
+            case .replacementsCorrupt:
+                return "replacements.json can't be read. It was moved aside so it isn't overwritten; a fresh file will be created."
+            case .replacementsQuarantineFailed(let detail):
+                return "replacements.json can't be read, and moving it aside also failed (\(detail)). It was not changed."
+            case .replacementsSaveFailed(let detail):
+                return "Couldn't save learned words. \(detail)"
+            }
+        }
+    }
+
+    private let correctionsURL: URL
+    private let replacementsURL: URL
+    private var appendedKey: String?
+
+    public init(
+        correctionsURL: URL = VoicePopPaths.corrections,
+        replacementsURL: URL = VoicePopPaths.replacements
+    ) {
+        self.correctionsURL = correctionsURL
+        self.replacementsURL = replacementsURL
+    }
+
+    /// No-op when the edited text equals the original (nothing to learn or record).
+    @discardableResult
+    public func save(entry: HistoryEntry, correctedText: String, maxPhraseWords: Int, now: Date = Date()) throws -> Bool {
+        let trimmed = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != entry.out, !trimmed.isEmpty else { return false }
+
+        let key = entry.ts + "\u{0}" + trimmed
+        if appendedKey != key {
+            do {
+                try CorrectionStore.appendThrowing(
+                    CorrectionEntry(
+                        ts: ISO8601DateFormatter().string(from: now),
+                        app: entry.app,
+                        style: entry.style,
+                        typed: entry.out,
+                        corrected: trimmed
+                    ),
+                    to: correctionsURL
+                )
+                appendedKey = key
+            } catch {
+                throw SaveError.correctionAppendFailed(String(describing: error))
+            }
+        }
+
+        switch Replacements.inspect(from: replacementsURL) {
+        case .corrupt:
+            do {
+                try VoicePopPaths.quarantine(replacementsURL)
+            } catch {
+                throw SaveError.replacementsQuarantineFailed(error.localizedDescription)
+            }
+            throw SaveError.replacementsCorrupt
+        case .missing:
+            var r = Replacements()
+            r.learn(typed: entry.rules, corrected: trimmed, maxPhraseWords: maxPhraseWords, now: now)
+            do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
+        case .ready(var r):
+            r.learn(typed: entry.rules, corrected: trimmed, maxPhraseWords: maxPhraseWords, now: now)
+            do { try r.save(to: replacementsURL) } catch { throw SaveError.replacementsSaveFailed(error.localizedDescription) }
+        }
+        return true
     }
 }

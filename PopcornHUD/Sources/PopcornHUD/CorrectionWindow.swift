@@ -7,6 +7,10 @@ private final class CorrectionPanel: NSWindow {
     }
 }
 
+/// The "Fix last text" editor (§4 of the polish spec). Save & Learn only teaches future
+/// dictation - it never touches text already inserted elsewhere - so the window explains that,
+/// offers a literal "Copy Corrected Text" action, and keeps the window and its contents open on
+/// a save failure with an inline, actionable error and Retry.
 final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate {
     static let shared = CorrectionWindowController()
 
@@ -14,14 +18,56 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     private var entry: HistoryEntry?
     private var textView: NSTextView?
     private var rawLabel: NSTextField?
+    private var explainLabel: NSTextField?
+    private var errorLabel: NSTextField?
+    private var retryButton: NSButton?
+    private var saveButton: NSButton?
     private var built = false
+    /// One saver per presented entry: it remembers which correction record it already appended,
+    /// so pressing Save again after a failure (Retry) never writes a duplicate.
+    private var saver: CorrectionSaver?
 
+    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): builds and populates the window from a fixture
+    /// entry without touching `HistoryStore`, optionally showing the inline error+Retry state.
+    func presentFixture(entry: HistoryEntry, correctedText: String, errorMessage: String? = nil) {
+        self.entry = entry
+        self.saver = CorrectionSaver()
+        if !built { buildWindow() }
+        rawLabel?.stringValue = "What I heard: \(entry.raw)"
+        textView?.string = correctedText
+        setError(errorMessage)
+        guard let window else { return }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Reads the last dictation off the main thread (via `LastHistoryEntryCache`, usually already
+    /// warm) and presents once it returns - `history.jsonl` must never be tail-read synchronously
+    /// on the thread handling a menu click or global shortcut.
     func present() {
+        // Reopening an existing editor must preserve edits, errors, and retry identity.
+        if let window, window.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            return
+        }
         if let front = NSWorkspace.shared.frontmostApplication,
            front.bundleIdentifier != PopcornHUDMain.bundleID {
             returnTo = front
         }
-        guard let entry = HistoryStore.last() else {
+        LastHistoryEntryCache.currentAsync { [weak self] entry in
+            self?.presentResolved(entry)
+        }
+    }
+
+    private func presentResolved(_ entry: HistoryEntry?) {
+        // Two rapid menu requests can complete asynchronously in either order.
+        if let window, window.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
             alert.alertStyle = .informational
@@ -31,9 +77,11 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
             return
         }
         self.entry = entry
+        self.saver = CorrectionSaver()
         if !built { buildWindow() }
         rawLabel?.stringValue = "What I heard: \(entry.raw)"
         textView?.string = entry.out
+        setError(nil)
         guard let window else { return }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -42,7 +90,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
 
     private func buildWindow() {
         let window = CorrectionPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 380),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -53,7 +101,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         window.delegate = self
         window.center()
 
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 320))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 540, height: 380))
         window.contentView = content
 
         let label = NSTextField(labelWithString: "What I heard: ")
@@ -64,6 +112,14 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         label.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(label)
         rawLabel = label
+
+        let explain = NSTextField(wrappingLabelWithString:
+            "\u{201c}Save & Learn\u{201d} teaches VoicePop this correction for future dictation. It does not change the text you already typed elsewhere.")
+        explain.font = NSFont.systemFont(ofSize: 11)
+        explain.textColor = .tertiaryLabelColor
+        explain.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(explain)
+        explainLabel = explain
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
@@ -82,8 +138,27 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         tv.autoresizingMask = [.width]
         tv.minSize = NSSize(width: 0, height: 0)
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.setAccessibilityLabel("Corrected text")
         scroll.documentView = tv
         textView = tv
+
+        let error = NSTextField(wrappingLabelWithString: "")
+        error.font = NSFont.systemFont(ofSize: 11)
+        error.textColor = .systemRed
+        error.translatesAutoresizingMaskIntoConstraints = false
+        error.isHidden = true
+        content.addSubview(error)
+        errorLabel = error
+
+        let retry = NSButton(title: "Retry", target: self, action: #selector(save))
+        retry.translatesAutoresizingMaskIntoConstraints = false
+        retry.isHidden = true
+        content.addSubview(retry)
+        retryButton = retry
+
+        let copy = NSButton(title: "Copy Corrected Text", target: self, action: #selector(copyCorrected))
+        copy.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(copy)
 
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.keyEquivalent = "\u{1b}"
@@ -95,15 +170,32 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         save.keyEquivalentModifierMask = .command
         save.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(save)
+        saveButton = save
 
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            scroll.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 10),
+
+            explain.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            explain.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            explain.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+
+            scroll.topAnchor.constraint(equalTo: explain.bottomAnchor, constant: 10),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            scroll.bottomAnchor.constraint(equalTo: save.topAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: error.topAnchor, constant: -8),
+
+            error.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            error.trailingAnchor.constraint(lessThanOrEqualTo: retry.leadingAnchor, constant: -8),
+            error.bottomAnchor.constraint(equalTo: copy.topAnchor, constant: -10),
+
+            retry.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            retry.centerYAnchor.constraint(equalTo: error.centerYAnchor),
+
+            copy.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            copy.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+
             save.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             save.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             cancel.trailingAnchor.constraint(equalTo: save.leadingAnchor, constant: -8),
@@ -122,54 +214,35 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         return false
     }
 
+    /// Copies exactly what is in the text view - not trimmed - per spec: "Copy returns exactly
+    /// the edited text."
+    @objc func copyCorrected() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(textView?.string ?? "", forType: .string)
+    }
+
     @objc func save() {
-        let corrected = (textView?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if let entry, corrected != entry.out, !corrected.isEmpty {
-            CorrectionStore.append(CorrectionEntry(
-                ts: ISO8601DateFormatter().string(from: Date()),
-                app: entry.app,
-                style: entry.style,
-                typed: entry.out,
-                corrected: corrected
-            ))
-            switch Replacements.inspect() {
-            case .corrupt:
-                Self.quarantine(VoicePopPaths.replacements)
-                alert("Couldn’t save learned words", "replacements.json looks corrupt. It was moved to replacements.json.bad so it is not overwritten.")
-                close()
-                return
-            case .missing:
-                var r = Replacements()
-                r.learn(typed: entry.rules, corrected: corrected, maxPhraseWords: StylePrefsCache.current().learning.maxPhraseWords)
-                do {
-                    try r.save()
-                } catch {
-                    alert("Could not save learned words", error.localizedDescription)
-                }
-            case .ready(var r):
-                r.learn(typed: entry.rules, corrected: corrected, maxPhraseWords: StylePrefsCache.current().learning.maxPhraseWords)
-                do {
-                    try r.save()
-                } catch {
-                    alert("Could not save learned words", error.localizedDescription)
-                }
-            }
+        guard let entry, let saver else { close(); return }
+        let corrected = textView?.string ?? ""
+        do {
+            _ = try saver.save(
+                entry: entry,
+                correctedText: corrected,
+                maxPhraseWords: StylePrefsCache.current().learning.maxPhraseWords
+            )
+            close()
+        } catch {
+            // Keep the window and the user's edits open; show an actionable error with Retry
+            // instead of silently discarding the correction (§4 requirement).
+            setError((error as? LocalizedError)?.errorDescription ?? String(describing: error))
         }
-        close()
     }
 
-    private func alert(_ message: String, _ info: String) {
-        let a = NSAlert()
-        a.messageText = message
-        a.informativeText = info
-        a.alertStyle = .warning
-        a.runModal()
-    }
-
-    private static func quarantine(_ url: URL) {
-        let bad = url.appendingPathExtension("bad")
-        try? FileManager.default.removeItem(at: bad)
-        try? FileManager.default.moveItem(at: url, to: bad)
+    private func setError(_ message: String?) {
+        errorLabel?.stringValue = message ?? ""
+        errorLabel?.isHidden = message == nil
+        retryButton?.isHidden = message == nil
     }
 
     @objc func cancel() {

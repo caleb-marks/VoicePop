@@ -12,6 +12,30 @@ enum PopcornHUDMain {
 
     static func main() {
         let app = NSApplication.shared
+
+        // MARK: - UI Snapshot Harness (VOICEPOP_UI_SNAPSHOT) — WS2, see INTERFACES.md.
+        // No services (no status item, HUD, state watcher, daemon, login item, or setup): renders
+        // Settings sections, the correction window, and the setup checklist against
+        // VOICEPOP_CONFIG_DIR fixtures, writes PNGs to the given directory, and exits. Never runs
+        // in a normal launch - only reached when the env var is set.
+        if let outDir = ProcessInfo.processInfo.environment["VOICEPOP_UI_SNAPSHOT"], !outDir.isEmpty {
+            // The harness seeds fixture history, styles, and learned words. Refuse to run against
+            // the real ~/.config/voicepop so a missing override can never overwrite user data.
+            let fixtureDir = ProcessInfo.processInfo.environment["VOICEPOP_CONFIG_DIR"] ?? ""
+            let realDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/voicepop").standardizedFileURL.resolvingSymlinksInPath().path
+            guard !fixtureDir.isEmpty,
+                  URL(fileURLWithPath: fixtureDir).standardizedFileURL.resolvingSymlinksInPath().path != realDir
+            else {
+                fputs("VoicePop UI snapshot harness: set VOICEPOP_CONFIG_DIR to a temporary directory (refusing to touch ~/.config/voicepop)\n", stderr)
+                exit(64)
+            }
+            app.setActivationPolicy(.accessory)
+            UISnapshotHarness.run(outputDirectory: outDir)
+            exit(0)
+        }
+        // MARK: - End UI Snapshot Harness
+
         app.setActivationPolicy(.regular)
         app.delegate = delegate
         app.run()
@@ -22,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: HUDController?
     private var statusItem: StatusItemController?
     private let stateWatcher = StateWatcher()
+    private lazy var health = DictationHealthMonitor(watcher: stateWatcher)
     private var previousApp: NSRunningApplication?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -46,19 +71,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = StatusItemIcon.dockImage()
 
         stateWatcher.start()
+        health.start()
+        SettingsWindowController.shared.health = health
+        SetupChecklistWindowController.shared.attach(health: health)
 
         let status = StatusItemController()
-        status.start(watcher: stateWatcher)
+        status.start(watcher: stateWatcher, health: health)
         statusItem = status
 
         controller = HUDController()
-        controller?.start(watcher: stateWatcher)
+        controller?.start(watcher: stateWatcher, health: health)
         fputs("VoicePop menu bar item ready\n", stderr)
         VoxtypeWarmer.shared.ensureWarm()
         yieldFocus()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // First-run setup closed before dictation services started: the checklist is the only way
+        // back, so reopen it instead of hiding the app.
+        if statusItem == nil {
+            SetupAssistant.presentChecklist()
+            return false
+        }
         if statusItem?.revealMenu() != true {
             fputs("VoicePop reopen: status item not clickable (overflow or missing)\n", stderr)
         }
@@ -86,10 +120,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.show()
+    }
+
     private func installMainMenu() {
         let menubar = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit VoicePop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         menubar.addItem(appItem)

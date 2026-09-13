@@ -6,10 +6,51 @@ public struct OllamaClient {
     public let model: String
     public let timeoutMs: Int
 
-    public init(endpoint: String, model: String, timeoutMs: Int) {
+    /// Result of one HTTP exchange, keeping timeouts distinct from refused connections.
+    public enum SendResult {
+        case response(Data?, HTTPURLResponse)
+        case timedOut
+        case failed
+    }
+
+    /// Performs a loopback-guarded request within `timeoutMs`. Injectable for tests.
+    public typealias Sender = (URLRequest, Int) -> SendResult
+
+    /// Why polishing did or did not replace the rules output. Never carries transcript text.
+    public enum PolishOutcome: Equatable {
+        case polished(String)
+        case invalidEndpoint
+        case unavailable
+        case timedOut
+        case httpError(Int)
+        /// The model answered, but the answer failed validation or was cut off.
+        case rejected
+
+        public var text: String? {
+            if case .polished(let t) = self { return t }
+            return nil
+        }
+
+        /// Stable token for timing logs.
+        public var timingName: String {
+            switch self {
+            case .polished: return "used"
+            case .invalidEndpoint: return "invalid-endpoint"
+            case .unavailable: return "unavailable"
+            case .timedOut: return "timeout"
+            case .httpError: return "http-error"
+            case .rejected: return "rejected"
+            }
+        }
+    }
+
+    private let sender: Sender
+
+    public init(endpoint: String, model: String, timeoutMs: Int, sender: Sender? = nil) {
         self.endpoint = endpoint
         self.model = model
         self.timeoutMs = timeoutMs
+        self.sender = sender ?? { Self.sendDetailed($0, timeoutMs: $1) }
     }
 
     public init(prefs: LLMPrefs) {
@@ -66,8 +107,7 @@ public struct OllamaClient {
         guard let url = Self.requestURL(endpoint: endpoint, path: "/api/tags") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        let (_, response) = Self.send(request, timeoutMs: timeoutMs)
-        guard let response else { return false }
+        guard case .response(_, let response) = sender(request, timeoutMs) else { return false }
         return (200...299).contains(response.statusCode)
     }
 
@@ -80,13 +120,18 @@ public struct OllamaClient {
             "model": model,
             "keep_alive": "5m",
         ])
-        let (_, response) = Self.send(request, timeoutMs: 10_000)
-        guard let response else { return false }
+        guard case .response(_, let response) = sender(request, 10_000) else { return false }
         return (200...299).contains(response.statusCode)
     }
 
     public func polish(text: String, glossary: [String], examples: [CorrectionEntry], budgetMs: Int? = nil) -> String? {
-        guard let url = Self.requestURL(endpoint: endpoint, path: "/api/chat") else { return nil }
+        polishDetailed(text: text, glossary: glossary, examples: examples, budgetMs: budgetMs).text
+    }
+
+    /// Bounded by `budgetMs` (or `timeoutMs`): a slow or missing model yields a non-`.polished`
+    /// outcome in time for the caller to fall back to its rules output.
+    public func polishDetailed(text: String, glossary: [String], examples: [CorrectionEntry], budgetMs: Int? = nil) -> PolishOutcome {
+        guard let url = Self.requestURL(endpoint: endpoint, path: "/api/chat") else { return .invalidEndpoint }
         let system = Self.systemPrompt(glossary: glossary, examples: examples)
         func body(includeThink: Bool) -> Data? {
             var obj: [String: Any] = [
@@ -111,31 +156,39 @@ public struct OllamaClient {
             return timeoutMs
         }
 
-        func post(_ data: Data, timeoutMs: Int) -> (Data?, HTTPURLResponse?) {
+        func post(_ data: Data, timeoutMs: Int) -> SendResult {
+            guard timeoutMs > 0 else { return .timedOut }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = data
-            return Self.send(request, timeoutMs: timeoutMs)
+            return sender(request, timeoutMs)
         }
 
-        guard let firstBody = body(includeThink: true) else { return nil }
-        var (data, response) = post(firstBody, timeoutMs: remaining())
-        if response?.statusCode == 400, remaining() >= 1000, let retryBody = body(includeThink: false) {
-            (data, response) = post(retryBody, timeoutMs: remaining())
+        guard let firstBody = body(includeThink: true) else { return .rejected }
+        var result = post(firstBody, timeoutMs: remaining())
+        if case .response(_, let r) = result, r.statusCode == 400, remaining() >= 1000,
+           let retryBody = body(includeThink: false) {
+            result = post(retryBody, timeoutMs: remaining())
+        }
+        let data: Data?
+        switch result {
+        case .timedOut: return .timedOut
+        case .failed: return .unavailable
+        case .response(let d, let r):
+            guard (200...299).contains(r.statusCode) else { return .httpError(r.statusCode) }
+            data = d
         }
         guard let data,
-              let response,
-              (200...299).contains(response.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = json["message"] as? [String: Any],
               let content = message["content"] as? String
-        else { return nil }
+        else { return .rejected }
         if let reason = json["done_reason"] as? String, reason != "stop" {
-            return nil
+            return .rejected
         }
         let cleaned = Self.sanitize(content)
-        return Self.validate(input: text, output: cleaned, glossary: glossary) ? cleaned : nil
+        return Self.validate(input: text, output: cleaned, glossary: glossary) ? .polished(cleaned) : .rejected
     }
 
     public static func systemPrompt(glossary: [String], examples: [CorrectionEntry]) -> String {
@@ -206,11 +259,19 @@ public struct OllamaClient {
         let lock = NSLock()
         var data: Data?
         var response: HTTPURLResponse?
+        var timedOut = false
     }
 
     static func send(_ request: URLRequest, timeoutMs: Int) -> (Data?, HTTPURLResponse?) {
+        if case .response(let data, let response) = sendDetailed(request, timeoutMs: timeoutMs) {
+            return (data, response)
+        }
+        return (nil, nil)
+    }
+
+    public static func sendDetailed(_ request: URLRequest, timeoutMs: Int) -> SendResult {
         var req = request
-        guard let url = req.url, isLoopbackURL(url) else { return (nil, nil) }
+        guard let url = req.url, isLoopbackURL(url) else { return .failed }
         req.timeoutInterval = TimeInterval(timeoutMs) / 1000.0
         let sem = DispatchSemaphore(value: 0)
         let box = SendBox()
@@ -225,10 +286,11 @@ public struct OllamaClient {
             kCFNetworkProxiesProxyAutoConfigEnable as String: false,
         ]
         let session = URLSession(configuration: configuration, delegate: LoopbackRedirectGuard(), delegateQueue: nil)
-        let task = session.dataTask(with: req) { d, r, _ in
+        let task = session.dataTask(with: req) { d, r, e in
             box.lock.lock()
             box.data = d
             box.response = r as? HTTPURLResponse
+            box.timedOut = (e as? URLError)?.code == .timedOut
             box.lock.unlock()
             sem.signal()
         }
@@ -236,12 +298,13 @@ public struct OllamaClient {
         if sem.wait(timeout: .now() + .milliseconds(timeoutMs)) == .timedOut {
             task.cancel()
             session.invalidateAndCancel()
-            return (nil, nil)
+            return .timedOut
         }
         session.finishTasksAndInvalidate()
         box.lock.lock()
         defer { box.lock.unlock() }
-        return (box.data, box.response)
+        if let response = box.response { return .response(box.data, response) }
+        return box.timedOut ? .timedOut : .failed
     }
 }
 

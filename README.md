@@ -43,7 +43,7 @@ A menu-bar app wraps a local speech engine ([Voxtype](https://voxtype.io), MIT, 
 Apple Silicon, macOS 13+.
 
 1. Download the latest asset from [Releases](https://github.com/caleb-marks/VoicePop/releases) - `.dmg` (drag to Applications). First launch must run from Applications; if you open the DMG copy, VoicePop will move itself there.
-2. Open VoicePop. First launch installs the speech engine, pulls the Parakeet model (~2.4 GB, once), and walks you through the two macOS switches it needs: **Accessibility** and **Input Monitoring** for Voxtype.
+2. Open VoicePop. A setup checklist installs the speech engine, downloads the Parakeet model (~2.4 GB, once) with progress and retry, and guides the permissions Voxtype needs (**Accessibility**, **Input Monitoring**, **Microphone**) and a practice dictation. Reopen it any time from **Settings… → General → Check Setup…**.
 3. Set **System Settings → Keyboard → Press 🌐 key to: Do Nothing** so Globe does not steal the key.
 
 Ad-hoc signed, not notarized. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**, once.
@@ -80,15 +80,15 @@ The original run - 40 TTS fixtures, CLI transcribe, WER + latency - could only c
 
 Better accuracy was not worth doubling the tail latency on a key you hold down. And that third row - a model that could not be benched at all because the binary did not include it - is why the repo carries a local Voxtype rebuild with `gpu-metal,parakeet,parakeet-coreml` enabled. Parakeet became the default once it was runnable; the official Whisper-only binary is kept for one-command rollback. Re-benching Parakeet on the same 40 fixtures is still open - see [docs/metrics.md](docs/metrics.md).
 
-Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests, timing instrumentation behind `POPCORNHUD_TIMING=1`, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
+Also here: fixed-step physics with a seeded RNG so HUD frames are reproducible in tests, opt-in timing instrumentation with a percentile report, and an honest [metrics doc](docs/metrics.md) that marks targets **blocked** where they still need a live-path probe rather than claiming a pass.
 
 Built with AI pair-programming (Claude Code, Codex). Architecture, product decisions, review, and macOS integration are mine.
 
 ## Daily use
 
-Menu bar → **Dictation model** switches engines (downloads on first pick, Ready line shows the active one). **Fix "…"** opens the last typed text; edit and **Save & Learn** (⌘↩). **More → Edit learned words…** for manual edits.
+The menu bar shows what dictation is doing ("Ready · Hold FN to dictate") and offers a fix when something is wrong, such as restarting the engine. **Fix Last Dictation…** opens the last typed text: edit it, then **Save & Learn** (⌘↩) to teach future dictation, or **Copy Corrected Text**. VoicePop never rewrites text already in another app. **Writing Style** sets the global and per-app style. **Settings… (⌘,)** has General (open at login, FN key help, setup checklist, history), Appearance (mascot with a live preview), Dictation (models with download progress, styles, optional local polish), and Learned Words (search, add, edit, delete).
 
-State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl`, the retained rotation `history.1.jsonl`, `corrections.jsonl`, and `replacements.json`. VoicePop keeps the directory owner-only (`0700`) and those files owner-only (`0600`). Use **More → Clear transcript history…** to remove both history files while keeping saved corrections, learned replacements, and styles. Names you say often can be seeded via `scripts/seed-replacements.py`.
+State is plain JSON in `~/.config/voicepop/`: `style.json`, `history.jsonl`, the retained rotation `history.1.jsonl`, `corrections.jsonl`, and `replacements.json`. VoicePop keeps the directory owner-only (`0700`) and those files owner-only (`0600`). Use **Settings… → General → Clear Transcript History…** to remove both history files while keeping saved corrections, learned replacements, and styles. Names you say often can be seeded via `scripts/seed-replacements.py`.
 
 <details>
 <summary><b>Build from source, rollback, instrumentation</b></summary>
@@ -127,10 +127,13 @@ cp .cache/voxtype-1.0.1-macos-universal-official /opt/homebrew/bin/voxtype
 ./scripts/restart-voxtype.sh
 ```
 
-Timing (quit VoicePop first; `open -a` does not inherit env):
+Timing (private log, no transcript text; see [docs/metrics.md](docs/metrics.md#live-measurement-procedure)):
 
 ```bash
-POPCORNHUD_TIMING=1 /Applications/VoicePop.app/Contents/MacOS/VoicePop
+defaults write com.caleb.voicepop VoicePopTiming -bool true   # then quit and reopen VoicePop
+PopcornHUD/Benchmarks/build.sh
+PopcornHUD/.build/bench/timing-report ~/Library/Logs/VoicePop/timing.log
+defaults delete com.caleb.voicepop VoicePopTiming
 ```
 
 </details>

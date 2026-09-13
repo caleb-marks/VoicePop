@@ -5,7 +5,19 @@ import SwiftUI
 import PopcornArt
 import PopcornCore
 
+/// HUD lifecycle and animation scheduling.
+///
+/// Work happens only while the HUD is shown: the display link (or 60 Hz timer fallback), audio
+/// socket, simulation, and SwiftUI host all stop and detach when hidden. Recording feedback starts
+/// only from a daemon recording state, and the first frame is published synchronously on entry
+/// rather than waiting for the next display-link callback.
 final class HUDController {
+    /// Delay before "Audio levels unavailable" is shown: the socket connects and the first frame
+    /// arrives shortly after recording starts, and a flash of the warning would be noise.
+    private static let levelsGraceMs: UInt64 = 600
+    /// If the display link has not ticked by then (no active display, reconfiguration), use the timer.
+    private static let displayLinkWatchdogMs = 300
+
     private let audio = AudioSocketReader()
     private let sim = PopcornSim()
 
@@ -27,15 +39,25 @@ final class HUDController {
     private var lastAnimMonoMs: UInt64?
     private let tickPending = OSAllocatedUnfairLock(initialState: false)
     private var capsuleFrozen = false
-    private var drawScratch: [PopcornRenderer.KernelDraw] = []
     private var lastPublishMonoMs: UInt64 = 0
     private var mascot: Mascot = .popcorn
+    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    /// Rounded-up backing scales whose kernel sprites were already prewarmed (main thread).
+    private var prewarmedScales: Set<Int> = []
+    private var health: DictationHealthMonitor?
+
+    // Recording session bookkeeping (main thread).
+    private var recordingEnteredMs: UInt64 = 0
+    private var levelsReportedUnavailable = false
+    private var animationStartedMs: UInt64 = 0
+    private var ticksSinceAnimationStart = 0
+    // Timing instrumentation (only used when Timing.enabled).
+    private var awaitingFirstVisible = false
+    private var awaitingFirstFrame = false
+    private var oldestUnshownPacketMs: UInt64 = 0
 
     deinit {
-        CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque()
-        )
+        observers.forEach { $0.0.removeObserver($0.1) }
         stopAnimation()
         audio.stop()
         panel?.orderOut(nil)
@@ -43,31 +65,30 @@ final class HUDController {
 
     private func transcriptReady() {
         guard presentation == .transcribing else { return }
-        Timing.log("transcript ready")
+        Timing.event("transcript.ready")
         beginHide()
     }
 
-    func start(watcher: StateWatcher) {
+    func start(watcher: StateWatcher, health: DictationHealthMonitor) {
+        self.health = health
         reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        DistributedNotificationCenter.default.addObserver(
-            forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
+        if Timing.enabled {
+            PopcornView.drawCostHook = { Timing.event("hud.draw", ["us": String($0)]) }
+        }
+        observe(DistributedNotificationCenter.default(), NSNotification.Name("AppleInterfaceThemeChangedNotification")) { [weak self] _ in
             self?.positionPanel()
         }
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.positionPanel()
+        observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification) { [weak self] _ in
+            guard let self else { return }
+            self.positionPanel()
+            self.prewarmSprites()
+            // The display link was bound to the displays active when it started.
+            self.restartAnimationClock(reason: "screens")
         }
-        NotificationCenter.default.addObserver(
-            forName: .voicePopMascotDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
+        observe(NSWorkspace.shared.notificationCenter, NSWorkspace.didWakeNotification) { [weak self] _ in
+            self?.restartAnimationClock(reason: "wake")
+        }
+        observe(NotificationCenter.default, .voicePopMascotDidChange) { [weak self] note in
             guard let self else { return }
             if let next = note.object as? Mascot {
                 self.mascot = next
@@ -76,40 +97,49 @@ final class HUDController {
             }
             if self.presentation != .hidden, let last = self.lastPublish {
                 var updated = last
-                updated.mascot = self.mascot
+                updated.scene.mascot = self.mascot
                 self.lastPublish = updated
                 self.hosting?.rootView = PopcornView(frame: updated)
             }
         }
-
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
+        observe(NSWorkspace.shared.notificationCenter, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification) { [weak self] _ in
             guard let self else { return }
             self.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             self.sim.reduceMotion = self.reduceMotion
             if self.reduceMotion { self.scale = 1 }
         }
 
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let ctrl = Unmanaged<HUDController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { ctrl.transcriptReady() }
-            },
-            VoicePopSignal.transcriptReady as CFString,
-            nil,
-            .deliverImmediately
-        )
+        health.addTranscriptReadyListener { [weak self] in
+            self?.transcriptReady()
+        }
 
         buildPanel()
+        prewarmSprites()
         watcher.addListener { [weak self] state in
             self?.handleState(state)
         }
         fputs("VoicePop started\n", stderr)
+    }
+
+    /// Paints kernel sprites for each connected display scale off main, so the first recording
+    /// frame does not rasterize them. The sprite cache is lock-protected and a cold cache still
+    /// draws correctly (painting on demand), so this only moves work earlier.
+    private func prewarmSprites() {
+        let scales = Set(NSScreen.screens.map { Int($0.backingScaleFactor.rounded(.up)) })
+            .subtracting(prewarmedScales)
+        guard !scales.isEmpty else { return }
+        prewarmedScales.formUnion(scales)
+        DispatchQueue.global(qos: .utility).async {
+            for scale in scales.sorted(by: >) {
+                let start = Timing.nowUs()
+                PopcornRenderer.prewarmKernelSprites(displayScale: CGFloat(scale))
+                Timing.event("hud.prewarm", ["scale": String(scale), "ms": String((Timing.nowUs() - start) / 1000)])
+            }
+        }
+    }
+
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name, _ block: @escaping (Notification) -> Void) {
+        observers.append((center, center.addObserver(forName: name, object: nil, queue: .main, using: block)))
     }
 
     private func buildPanel() {
@@ -137,8 +167,8 @@ final class HUDController {
         if panel == nil { buildPanel() }
         guard let panel else { return }
         let empty = PopcornFrame(
-            opacity: 0, scale: 0.9, bagVisible: 1, heat: 0, mood: 0, kick: 0, bobPhase: 0,
-            label: "", detail: "", presentation: .hidden, reduceMotion: reduceMotion, kernels: []
+            opacity: 0, scale: 0.9,
+            scene: .still(label: "", presentation: .hidden, reduceMotion: reduceMotion, mascot: mascot, bagVisible: 1)
         )
         let host = NSHostingView(rootView: PopcornView(frame: empty))
         host.frame = NSRect(x: 0, y: 0, width: Tunables.cardW, height: Tunables.cardH)
@@ -192,6 +222,11 @@ final class HUDController {
         lastAnimMonoMs = nil
         lastPublishMonoMs = 0
         capsuleFrozen = false
+        recordingEnteredMs = Timing.nowMs()
+        levelsReportedUnavailable = false
+        awaitingFirstVisible = Timing.enabled
+        awaitingFirstFrame = false
+        oldestUnshownPacketMs = 0
         sim.reset()
         sim.allowSpawn = true
         sim.reduceMotion = reduceMotion
@@ -200,16 +235,31 @@ final class HUDController {
         attachHost()
         positionPanel()
         panel?.orderFrontRegardless()
-        NSAccessibility.post(element: panel as Any, notification: .announcementRequested, userInfo: [
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
             .announcement: label as NSString,
             .priority: NSAccessibilityPriorityLevel.high.rawValue as NSNumber,
         ])
+        Timing.event("hud.enter")
         startAnimation()
-        Timing.log("enter recording")
+        // Publish the first frame now instead of up to one display interval later.
+        tick()
+    }
+
+    /// Reports the finished recording's level statistics once, when it leaves `.recording`.
+    private func endRecordingSession() {
+        guard presentation == .recording else { return }
+        let stats = audio.sessionStats()
+        let duration = Timing.nowMs() &- recordingEnteredMs
+        health?.noteRecordingLevels(frames: stats.frames, maxPeak: stats.maxPeak, durationMs: duration)
+        if levelsReportedUnavailable {
+            levelsReportedUnavailable = false
+            health?.noteAudioLevels(available: true)
+        }
     }
 
     private func beginTranscribing() {
         guard presentation == .recording || presentation == .transcribing else { return }
+        endRecordingSession()
         presentation = .transcribing
         label = "Transcribing…"
         detail = ""
@@ -218,15 +268,16 @@ final class HUDController {
         collapseProgress = 0
         lastAnimMonoMs = nil
         capsuleFrozen = false
-        NSAccessibility.post(element: panel as Any, notification: .announcementRequested, userInfo: [
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
             .announcement: "Transcribing" as NSString,
             .priority: NSAccessibilityPriorityLevel.high.rawValue as NSNumber,
         ])
         startAnimation()
-        Timing.log("transcribing")
+        Timing.event("hud.transcribing")
     }
 
     private func beginHide() {
+        endRecordingSession()
         audio.stop()
         sim.allowSpawn = false
         capsuleFrozen = false
@@ -242,14 +293,20 @@ final class HUDController {
         panel?.orderOut(nil)
         stopAnimation()
         detachHost()
-        Timing.log("hidden")
+        Timing.event("hud.hidden")
     }
+
+    // MARK: - Animation clock
 
     private func startAnimation() {
         guard !animating else { return }
         animating = true
         tickPending.withLock { $0 = false }
-        if !startDisplayLink() {
+        animationStartedMs = Timing.nowMs()
+        ticksSinceAnimationStart = 0
+        if startDisplayLink() {
+            armDisplayLinkWatchdog()
+        } else {
             startTimerFallback()
         }
     }
@@ -266,20 +323,44 @@ final class HUDController {
         timerFallback = nil
     }
 
+    /// Rebinds the clock after display reconfiguration or wake. No-op while hidden.
+    private func restartAnimationClock(reason: String) {
+        guard animating else { return }
+        Timing.event("hud.clock", ["reason": reason])
+        stopAnimation()
+        startAnimation()
+    }
+
     private func startDisplayLink() -> Bool {
         var link: CVDisplayLink?
         guard CVDisplayLinkCreateWithActiveCGDisplays(&link) == kCVReturnSuccess, let link else {
             return false
         }
-        displayLink = link
+        // Follow the HUD's display so ticks line up with its refresh.
+        if let number = panel?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            CVDisplayLinkSetCurrentCGDisplay(link, CGDirectDisplayID(number.uint32Value))
+        }
         let callback: CVDisplayLinkOutputCallback = { _, _, _, _, _, userInfo -> CVReturn in
             let ctrl = Unmanaged<HUDController>.fromOpaque(userInfo!).takeUnretainedValue()
             ctrl.scheduleTick()
             return kCVReturnSuccess
         }
         CVDisplayLinkSetOutputCallback(link, callback, Unmanaged.passUnretained(self).toOpaque())
-        CVDisplayLinkStart(link)
+        guard CVDisplayLinkStart(link) == kCVReturnSuccess else { return false }
+        displayLink = link
         return true
+    }
+
+    private func armDisplayLinkWatchdog() {
+        let started = animationStartedMs
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Self.displayLinkWatchdogMs)) { [weak self] in
+            guard let self, self.animating, self.animationStartedMs == started,
+                  self.displayLink != nil, self.ticksSinceAnimationStart <= 1 else { return }
+            Timing.event("hud.clock", ["reason": "displayLinkStalled"])
+            if let link = self.displayLink { CVDisplayLinkStop(link) }
+            self.displayLink = nil
+            self.startTimerFallback()
+        }
     }
 
     /// Coalesce DisplayLink callbacks so main only ever has one pending tick.
@@ -298,6 +379,7 @@ final class HUDController {
     }
 
     private func startTimerFallback() {
+        guard timerFallback == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now(), repeating: 1.0 / 60.0)
         t.setEventHandler { [weak self] in self?.tick() }
@@ -305,10 +387,19 @@ final class HUDController {
         t.resume()
     }
 
+    // MARK: - Tick
+
     private func tick() {
         guard animating else { return }
         if capsuleFrozen {
             return
+        }
+        ticksSinceAnimationStart += 1
+        let tickStartUs = Timing.enabled ? Timing.nowUs() : 0
+        if awaitingFirstFrame {
+            // The first visible frame was committed during the previous run-loop pass.
+            awaitingFirstFrame = false
+            Timing.event("hud.frame")
         }
 
         let mono = Timing.nowMs()
@@ -328,16 +419,17 @@ final class HUDController {
             scale = reduceMotion ? 1 : 0.90 + 0.10 * e
 
             let sample = audio.consumePeak()
-            sim.levelsUnavailable = sample.freshness == .unavailable
-            if sim.levelsUnavailable {
-                detail = "Audio levels unavailable"
-            } else {
-                detail = ""
+            if sample.freshness == .fresh, oldestUnshownPacketMs == 0 {
+                oldestUnshownPacketMs = sample.oldestPacketMonoMs
             }
-            let usePeak: Float = sample.freshness == .unavailable ? 0 : sample.peak
+            let unavailable = sample.freshness == .unavailable
+            sim.levelsUnavailable = unavailable
+            let pastGrace = mono &- recordingEnteredMs >= Self.levelsGraceMs
+            detail = unavailable && pastGrace ? "Audio levels unavailable" : ""
+            reportLevels(unavailable: unavailable, pastGrace: pastGrace)
             let snapSim = sim.advance(
                 toMonoMs: mono,
-                peak: usePeak,
+                peak: unavailable ? 0 : sample.peak,
                 peakFresh: sample.freshness == .fresh
             )
             // Tick the sim at display rate (onsets need 120 Hz against 100 Hz audio frames);
@@ -348,7 +440,7 @@ final class HUDController {
             }
         } else if presentation == .transcribing {
             if collapseProgress < 1 {
-                collapseProgress = min(1, collapseProgress + wallDt / (Tunables.collapseMs / 1000))
+                collapseProgress = min(1, collapseProgress + wallDt / (Tunables.collapseMs(for: mascot) / 1000)) // polish-shared: WS1 per-mascot collapse duration
                 let c = easeOut(collapseProgress)
                 sim.setBagVisible(1 - c)
                 opacity = 1
@@ -364,6 +456,19 @@ final class HUDController {
                 animating = false
             }
         }
+        if Timing.enabled {
+            Timing.event("hud.tick", ["us": String(Timing.nowUs() - tickStartUs)])
+        }
+    }
+
+    private func reportLevels(unavailable: Bool, pastGrace: Bool) {
+        if unavailable, pastGrace, !levelsReportedUnavailable {
+            levelsReportedUnavailable = true
+            health?.noteAudioLevels(available: false)
+        } else if !unavailable, levelsReportedUnavailable {
+            levelsReportedUnavailable = false
+            health?.noteAudioLevels(available: true)
+        }
     }
 
     private func easeOut(_ t: Double) -> Double {
@@ -371,51 +476,48 @@ final class HUDController {
     }
 
     private func publish(from snap: SimSnapshot) {
-        drawScratch.removeAll(keepingCapacity: true)
-        if drawScratch.capacity < Tunables.maxKernels {
-            drawScratch.reserveCapacity(Tunables.maxKernels)
-        }
-        for k in snap.kernels {
-            drawScratch.append(PopcornRenderer.KernelDraw(
-                front: k.front, settled: k.settled,
-                x: CGFloat(k.x), y: CGFloat(k.y), scale: CGFloat(k.scale),
-                rot: CGFloat(k.rot), shape: k.shape, butter: CGFloat(k.butter), alpha: k.alpha
-            ))
-        }
         let frame = PopcornFrame(
             opacity: opacity,
             scale: scale,
-            bagVisible: snap.bagVisible,
-            heat: snap.heat,
-            mood: snap.mood,
-            kick: snap.kick,
-            bobPhase: snap.phase,
-            label: label,
-            detail: detail,
-            presentation: presentation,
-            reduceMotion: reduceMotion,
-            kernels: drawScratch,
-            mascot: mascot
+            scene: PopcornRenderer.SceneInput(
+                snapshot: snap, label: label, detail: detail, presentation: presentation,
+                reduceMotion: reduceMotion, mascot: mascot
+            )
         )
         let kernelsMoving = presentation == .recording || collapseProgress < 1
-        if kernelsMoving {
-            lastPublish = frame
-            hosting?.rootView = PopcornView(frame: frame)
-        } else if frame != lastPublish {
-            lastPublish = frame
-            hosting?.rootView = PopcornView(frame: frame)
+        if kernelsMoving || frame != lastPublish {
+            setRoot(frame)
         }
     }
 
     private func publishCapsuleOnly() {
         let frame = PopcornFrame(
-            opacity: 1, scale: reduceMotion ? 1 : 0.65, bagVisible: 0, heat: 0, mood: 0, kick: 0, bobPhase: 0,
-            label: label, detail: "", presentation: .transcribing, reduceMotion: reduceMotion, kernels: [],
-            mascot: mascot
+            opacity: 1, scale: reduceMotion ? 1 : 0.65,
+            scene: .still(label: label, presentation: .transcribing, reduceMotion: reduceMotion, mascot: mascot)
         )
         if frame != lastPublish {
-            lastPublish = frame
+            setRoot(frame)
+        }
+    }
+
+    private func setRoot(_ frame: PopcornFrame) {
+        lastPublish = frame
+        guard Timing.enabled else {
             hosting?.rootView = PopcornView(frame: frame)
+            return
+        }
+        let start = Timing.nowUs()
+        hosting?.rootView = PopcornView(frame: frame)
+        let now = Timing.nowUs()
+        Timing.event("hud.publish", ["us": String(now - start)])
+        if awaitingFirstVisible, frame.opacity > 0, presentation == .recording {
+            awaitingFirstVisible = false
+            awaitingFirstFrame = true
+            Timing.event("hud.visible", ["opacity": String(format: "%.2f", frame.opacity)])
+        }
+        if oldestUnshownPacketMs > 0, presentation == .recording {
+            Timing.event("audio.react", ["ms": String(format: "%.1f", Double(now) / 1000 - Double(oldestUnshownPacketMs))])
+            oldestUnshownPacketMs = 0
         }
     }
 }
