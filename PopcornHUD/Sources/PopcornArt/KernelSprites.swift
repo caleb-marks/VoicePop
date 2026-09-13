@@ -38,9 +38,10 @@ enum KernelSprites {
         return (level, variant)
     }
 
-    /// Pixel density bucket for the destination scale, sized for the largest heap kernel.
+    /// Pixel density bucket for the destination scale. 1× screens sample from 2× sprites: the
+    /// downsample keeps small kernels' lobe edges slightly crisper than a 1× bitmap rotated in place.
     static func density(displayScale: CGFloat) -> Int {
-        max(1, min(4, Int(displayScale.rounded(.up))))
+        max(2, min(4, Int(displayScale.rounded(.up))))
     }
 
     static func body(shape: Int, butter: CGFloat, density: Int) -> Image {
@@ -276,12 +277,12 @@ enum KernelSprites {
 
         // Warm inner rim so the silhouette holds on white without a dark outline.
         ctx.addPath(outline)
-        ctx.setStrokeColor(color(Palette.kernelAmber, 0.10))
-        ctx.setLineWidth(0.20)
+        ctx.setStrokeColor(color(Palette.kernelAmber, 0.16))
+        ctx.setLineWidth(0.22)
         ctx.strokePath()
         ctx.addPath(outline)
-        ctx.setStrokeColor(color(Palette.kernelAmber, 0.14))
-        ctx.setLineWidth(0.07)
+        ctx.setStrokeColor(color(Palette.kernelAmber, 0.22))
+        ctx.setLineWidth(0.08)
         ctx.strokePath()
         ctx.restoreGState()
 
@@ -293,7 +294,7 @@ enum KernelSprites {
 
     private static func paintShadow(_ ctx: CGContext, shape: Int, density: Int) {
         let outline = KernelArt.path(shape: shape)
-        let shadowColor = color(Palette.kernelShadow, 0.20)
+        let shadowColor = color(Palette.kernelShadow, 0.30)
         // Blur is specified in device pixels and ignores the CTM.
         ctx.setShadow(offset: .zero, blur: 1.6 * CGFloat(density), color: shadowColor)
         ctx.addPath(outline)

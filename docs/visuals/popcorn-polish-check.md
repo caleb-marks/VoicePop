@@ -1,4 +1,4 @@
-# Popcorn voice-polish verification - 2026-09-13T00:30:43Z
+# Popcorn voice-polish verification - 2026-09-13T00:47:25Z
 
 Production HUD remains Canvas-only. Popcorn captures use the
 fixed 260×420 point scene and the production `SceneInput(snapshot:)` mapping; primary stills use 2× documentation scale with native 1× copies where applicable. Kernels are pre-rendered sprites under one scene-space light; the decorative pile is spring-simulated in `PopcornSim`.
@@ -8,10 +8,10 @@ fixed 260×420 point scene and the production `SceneInput(snapshot:)` mapping; p
 - Capture command: `PopcornCapture <output-directory> popcorn`.
 - Seed 2026 sequence: quiet 0.035 (2 s), normal 0.12 (2 s), loud 0.28 (3 s),
   accents (2 s), silence (1 s). Light and dark backgrounds.
-- Peak kernel count in capture: 71 (cap 120).
-- Sequence generation wall time (simulation, still rendering, and PNG writes): 179.6 ms.
-- Offscreen Canvas renders (2× light+dark pair): median 0.97 ms,
-  95th 1.02 ms. These are ImageRenderer measurements,
+- Peak kernel count in capture: 63 (cap 120).
+- Sequence generation wall time (simulation, still rendering, and PNG writes): 188.5 ms.
+- Offscreen Canvas renders (2× light+dark pair): median 1.03 ms,
+  95th 1.07 ms. These are ImageRenderer measurements,
   **not** live display/compositor frame timings and **not** microphone-to-screen latency.
   Layered release numbers come from `PopcornCapture --bench`.
 - Packet-to-render path is one display tick after `consumePeak` (held level between

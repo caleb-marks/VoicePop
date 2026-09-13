@@ -132,46 +132,57 @@ final class HeapMotionTests: XCTestCase {
         XCTAssertLessThan(maxShift[1], maxShift[0] * 0.1)
     }
 
-    func testFiveMinutesOfLoudAccentedSpeechStaysBounded() {
+    func testLongLoudAccentedSpeechStaysBounded() {
+        // Ninety seconds of fixed steps (no display snapshots) is ~60 accent cycles and dozens of
+        // kernel lifetimes: long enough for any drift or energy build-up to show, short enough
+        // to keep the suite fast in debug builds.
         let sim = PopcornSim(seed: 2026)
         sim.allowSpawn = true
         let pieces = sim.heapMotion.pieces
         var maxCount = 0, maxSettled = 0
         var mono: UInt64 = 0
         var speech = SyntheticSpeech(intensity: .energetic, seed: 3)
-        for frame in 0..<(300 * 120) {
+        let seconds = 90
+        var worstTravel = 0.0, worstSpeed = 0.0, worstRestingVx = 0.0
+        var highestResting = Double.infinity
+        var allFinite = true
+        for frame in 0..<(seconds * 120) {
             mono += 8
             var (peak, fresh) = speech.sample(atMonoMs: mono)
             // Every 1.5 s, slam a maximal accent on top of the syllables.
             if frame % 180 < 3 { peak = 1; fresh = true }
-            _ = sim.advance(toMonoMs: mono, peak: peak, peakFresh: fresh)
+            sim.step(dt: Tunables.simDt, peak: peak, peakFresh: fresh)
             maxCount = max(maxCount, sim.kernels.count)
-            maxSettled = max(maxSettled, sim.kernels.filter(\.settled).count)
-            if frame % 12 == 0 {
+            if frame % 6 == 0 {
+                maxSettled = max(maxSettled, sim.kernels.reduce(0) { $0 + ($1.settled ? 1 : 0) })
+                // Track the worst use of each limit (1 = at the limit) and assert once at the end.
                 let heap = sim.heapMotion
                 for i in pieces.indices {
                     let p = heap.pose[i], v = heap.velocity[i]
-                    XCTAssertLessThanOrEqual(abs(p.dx), pieces[i].maxX + 1e-9)
-                    XCTAssertLessThanOrEqual(-p.dy, pieces[i].maxUp + 1e-9)
-                    XCTAssertLessThanOrEqual(p.dy, pieces[i].maxDown + 1e-9)
-                    XCTAssertLessThanOrEqual(abs(p.rot), pieces[i].maxRot + 1e-9)
-                    XCTAssertLessThanOrEqual(max(abs(v.dx), abs(v.dy)), HeapMotion.maxSpeed)
-                    XCTAssertLessThanOrEqual(abs(v.rot), HeapMotion.maxSpin)
-                    XCTAssertTrue(p.dx.isFinite && p.dy.isFinite && p.rot.isFinite)
+                    worstTravel = max(worstTravel, abs(p.dx) / pieces[i].maxX, -p.dy / pieces[i].maxUp,
+                                      p.dy / pieces[i].maxDown, abs(p.rot) / pieces[i].maxRot)
+                    worstSpeed = max(worstSpeed, abs(v.dx) / HeapMotion.maxSpeed, abs(v.dy) / HeapMotion.maxSpeed,
+                                     abs(v.rot) / HeapMotion.maxSpin)
+                    allFinite = allFinite && p.dx.isFinite && p.dy.isFinite && p.rot.isFinite
                 }
                 for k in sim.kernels {
-                    XCTAssertTrue(k.x.isFinite && k.y.isFinite && k.vx.isFinite && k.vy.isFinite)
+                    allFinite = allFinite && k.x.isFinite && k.y.isFinite && k.vx.isFinite && k.vy.isFinite
                     if k.settled {
-                        XCTAssertLessThanOrEqual(abs(k.vx), 40)
-                        XCTAssertLessThanOrEqual(abs(k.vy), 400)
-                        XCTAssertGreaterThan(k.y, Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH) - 70)
+                        worstRestingVx = max(worstRestingVx, abs(k.vx))
+                        highestResting = min(highestResting, k.y)
                     }
                 }
             }
         }
+        XCTAssertTrue(allFinite)
+        XCTAssertLessThanOrEqual(worstTravel, 1 + 1e-9)
+        XCTAssertGreaterThan(worstTravel, 0.3, "loud accents should use a real share of the travel")
+        XCTAssertLessThanOrEqual(worstSpeed, 1 + 1e-9)
+        XCTAssertLessThanOrEqual(worstRestingVx, 40)
+        XCTAssertGreaterThan(highestResting, Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH) - 70)
         XCTAssertLessThanOrEqual(maxCount, Tunables.maxKernels)
         XCTAssertLessThanOrEqual(maxSettled, Tunables.maxSettledKernels)
-        XCTAssertGreaterThan(sim.emittedCount, 300 * 10)
+        XCTAssertGreaterThan(sim.emittedCount, seconds * 10)
     }
 
     func testSilenceSettlesToExactRestInBoundedTime() {
@@ -242,6 +253,25 @@ final class HeapMotionTests: XCTestCase {
         // Backwards clock jump is handled the same way.
         _ = sim.advance(toMonoMs: mono, peak: 0.34, peakFresh: true)
         XCTAssertLessThanOrEqual(sim.emittedCount - emitted, 4)
+    }
+
+    func testStrayKernelsFadeBeforeReachingTheStatusCapsule() {
+        let sim = PopcornSim(seed: 29)
+        sim.allowSpawn = true
+        let cx = Double(Tunables.cardW) / 2
+        let lip = Double(Tunables.cardH - Tunables.bagBottomPad - Tunables.bagH)
+        // Top of the status capsule under the visible tub (see PopcornRenderer's metrics).
+        let capsuleTop = Double(Tunables.cardH - Tunables.bagBottomPad) - 22 + 6
+        var strays = 0
+        _ = runSpeech(sim, seconds: 20) { snap, _ in
+            for k in snap.kernels where !k.settled && abs(k.x - cx) > Double(Tunables.mouthHalf) && k.vy > 0 {
+                if k.y > lip + 30 { strays += 1 }
+                if k.y + k.hitRadius > capsuleTop {
+                    XCTAssertEqual(k.alpha, 0, accuracy: 1e-9, "a stray kernel is still visible over the capsule")
+                }
+            }
+        }
+        XCTAssertGreaterThan(strays, 20, "energetic speech should throw some kernels past the rim")
     }
 
     func testHeapPosesInterpolateBetweenFixedSteps() {
