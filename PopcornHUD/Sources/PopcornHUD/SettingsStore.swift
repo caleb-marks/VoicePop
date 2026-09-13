@@ -85,7 +85,7 @@ final class SettingsStore: ObservableObject {
             saveError = nil
             NotificationCenter.default.post(name: .voicePopStylePrefsDidChange, object: ObjectIdentifier(self))
         } catch {
-            saveError = error.localizedDescription
+            saveError = "Couldn’t save this setting. \(error.localizedDescription) Your change is kept here; choose Retry to save it."
         }
     }
 }
