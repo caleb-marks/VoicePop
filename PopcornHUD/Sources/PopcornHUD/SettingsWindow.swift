@@ -43,6 +43,8 @@ final class SettingsWindowController {
         if windowController == nil {
             buildWindow()
         }
+        // Pick up anything the menu bar changed (e.g. Writing Style) while the window was hidden.
+        store.refreshFromCache()
         select(section)
         NSApp.activate(ignoringOtherApps: true)
         windowController?.window?.makeKeyAndOrderFront(nil)

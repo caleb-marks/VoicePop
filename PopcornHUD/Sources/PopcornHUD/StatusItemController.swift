@@ -336,6 +336,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         do {
             try prefs.save()
             StylePrefsCache.store(prefs)
+            // So an open Settings window (SettingsStore) refreshes instead of showing a stale
+            // value or later overwriting this change with what it had before.
+            NotificationCenter.default.post(name: .voicePopStylePrefsDidChange, object: nil)
         } catch {
             fputs("VoicePop: style.json save failed: \(error)\n", stderr)
         }
