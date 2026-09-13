@@ -21,6 +21,7 @@ public final class AudioLevelSocket {
     private let reconnectDelayMs: Int
     private let staleMs: UInt64
     private let queue = DispatchQueue(label: "com.caleb.voicepop.audio", qos: .userInteractive)
+    private let queueKey = DispatchSpecificKey<Void>()
 
     // Queue-confined.
     private var generation: UInt64 = 0
@@ -42,16 +43,19 @@ public final class AudioLevelSocket {
         self.path = path
         self.reconnectDelayMs = reconnectDelayMs
         self.staleMs = staleMs
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     deinit {
-        // Cancel armed sources on the audio queue so cancel handlers (which own the fd) run.
-        queue.sync {
-            active = false
-            generation &+= 1
-            cancelReconnect()
-            teardownFD()
+        // Cancel armed sources so cancel handlers (which own the fd) run. The last release can
+        // happen inside a handler on the audio queue, where `queue.sync` would deadlock.
+        let teardown = {
+            self.active = false
+            self.generation &+= 1
+            self.cancelReconnect()
+            self.teardownFD()
         }
+        if DispatchQueue.getSpecific(key: queueKey) != nil { teardown() } else { queue.sync(execute: teardown) }
     }
 
     public func start() {
@@ -85,7 +89,7 @@ public final class AudioLevelSocket {
 
     /// Waits for queued start/stop work (tests).
     public func waitUntilIdle() {
-        queue.sync {}
+        if DispatchQueue.getSpecific(key: queueKey) == nil { queue.sync {} }
     }
 
     /// Consume levels for one display tick. Distinguishes fresh / held / unavailable.

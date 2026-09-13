@@ -45,6 +45,11 @@ public enum DaemonProcess {
 /// publish on change. A one-shot backoff timer (50 ms → 2 s) runs only while some source cannot be
 /// registered; healthy observation has no timers at all.
 ///
+/// While the runtime directory is missing, its parent (e.g. `/tmp`) is watched instead. Unrelated
+/// churn there would otherwise reconcile on every create/delete by any process, so events from the
+/// parent watch are coalesced to at most one reconcile per `parentCoalesceMs` (250 ms). That bounds
+/// how late a newly started daemon is noticed, only while it had no runtime directory.
+///
 /// Rules: no live daemon → `.missing`; a 0-byte read (truncate-then-write in progress) keeps the
 /// last state; a PID whose exit was observed stays dead until the PID file is rewritten.
 public final class DaemonStateObserver {
@@ -60,6 +65,8 @@ public final class DaemonStateObserver {
         public var deliveryQueue: DispatchQueue
         public var fallbackInitialMs: Int
         public var fallbackMaxMs: Int
+        /// Minimum spacing of reconciles triggered by the parent-directory watch.
+        public var parentCoalesceMs: Int
 
         public init(
             statePath: String = Paths.state,
@@ -69,7 +76,8 @@ public final class DaemonStateObserver {
             openForEvents: @escaping (String) -> Int32 = { open($0, O_EVTONLY | O_CLOEXEC) },
             deliveryQueue: DispatchQueue = .main,
             fallbackInitialMs: Int = 50,
-            fallbackMaxMs: Int = 2000
+            fallbackMaxMs: Int = 2000,
+            parentCoalesceMs: Int = 250
         ) {
             self.statePath = statePath
             self.pidPath = pidPath
@@ -79,6 +87,7 @@ public final class DaemonStateObserver {
             self.deliveryQueue = deliveryQueue
             self.fallbackInitialMs = fallbackInitialMs
             self.fallbackMaxMs = fallbackMaxMs
+            self.parentCoalesceMs = parentCoalesceMs
         }
     }
 
@@ -87,6 +96,8 @@ public final class DaemonStateObserver {
         public var eventWakeups = 0
         public var fallbackWakeups = 0
         public var reconciles = 0
+        /// Parent-directory events folded into an already scheduled reconcile.
+        public var coalescedParentEvents = 0
         public var openDescriptors = 0
         public var processSources = 0
         /// False while the fallback timer is armed.
@@ -156,6 +167,7 @@ public final class DaemonStateObserver {
     private var diag = Diagnostics()
     private var readBuf = [UInt8](repeating: 0, count: 64)
     private var current: DaemonState = .missing
+    private var parentReconcilePending = false
 
     // Read from any thread.
     private let lock = NSLock()
@@ -235,10 +247,12 @@ public final class DaemonStateObserver {
         var healthy = true
 
         // Runtime directory, or its parent while it does not exist, catches create/rename/delete.
-        let dirPath = FileID(path: config.runtimeDirectory) != nil
+        let runtimeExists = FileID(path: config.runtimeDirectory) != nil
+        let dirPath = runtimeExists
             ? config.runtimeDirectory
             : (config.runtimeDirectory as NSString).deletingLastPathComponent
-        healthy = bind(&dirWatch, path: dirPath, mask: [.write, .delete, .rename, .revoke, .link], gen: gen) && healthy
+        healthy = bind(&dirWatch, path: dirPath, mask: [.write, .delete, .rename, .revoke, .link], gen: gen,
+                       coalesce: !runtimeExists) && healthy
         // Files are watched for in-place writes and for their own deletion/replacement.
         let fileMask: DispatchSource.FileSystemEvent = [.write, .extend, .attrib, .delete, .rename, .revoke]
         healthy = bind(&pidWatch, path: config.pidPath, mask: fileMask, gen: gen, optional: true) && healthy
@@ -264,7 +278,8 @@ public final class DaemonStateObserver {
         path: String,
         mask: DispatchSource.FileSystemEvent,
         gen: UInt64,
-        optional: Bool = false
+        optional: Bool = false,
+        coalesce: Bool = false
     ) -> Bool {
         let id = FileID(path: path)
         if let w = watch, w.path == path, w.id.sameNode(id) { return true }
@@ -282,7 +297,21 @@ public final class DaemonStateObserver {
         source.setEventHandler { [weak self] in
             guard let self else { return }
             self.diag.eventWakeups += 1
-            self.reconcile(gen)
+            guard coalesce else {
+                self.reconcile(gen)
+                return
+            }
+            guard !self.parentReconcilePending else {
+                self.diag.coalescedParentEvents += 1
+                return
+            }
+            self.parentReconcilePending = true
+            self.queue.asyncAfter(deadline: .now() + .milliseconds(self.config.parentCoalesceMs)) { [weak self] in
+                guard let self else { return }
+                self.parentReconcilePending = false
+                // Current generation: a stop/start while pending must not swallow this event.
+                self.reconcile(self.generation)
+            }
         }
         source.setCancelHandler { [weak self] in
             close(fd)

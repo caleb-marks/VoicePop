@@ -96,6 +96,19 @@ final class DictationStatusTests: XCTestCase {
             XCTAssertEqual(s.actions, [.restartEngine], "no new text exists to copy after \(failure)")
             XCTAssertFalse(s.headline.lowercased().contains("inserted"))
         }
+        // History holds the failed dictation's text (daemon died or stalled after cleanup): offer copy.
+        for failure in [DictationFailure.stoppedUnexpectedly, .transcriptionStuck] {
+            s = status { $0.lastFailure = failure.rawValue; $0.lastFailureHasText = true }
+            XCTAssertEqual(s.actions, [.copyLastText, .restartEngine])
+            XCTAssertTrue(s.detail!.contains("saved"))
+        }
+        XCTAssertTrue(DictationSessionTracker.historyEntry(ts: "2026-09-12T20:00:05Z",
+                                                          isFromSessionStartedAt: TimingReport.parseWall("2026-09-12T20:00:05.600Z")!),
+                      "second-precision stamps get one second of tolerance")
+        XCTAssertFalse(DictationSessionTracker.historyEntry(ts: "2026-09-12T20:00:02Z",
+                                                           isFromSessionStartedAt: TimingReport.parseWall("2026-09-12T20:00:05Z")!))
+        XCTAssertFalse(DictationSessionTracker.historyEntry(ts: "garbage", isFromSessionStartedAt: Date()))
+
         s = status { $0.lastFailure = "Voxtype reported an error" }
         XCTAssertEqual(s.headline, "Last dictation didn’t finish")
         XCTAssertEqual(s.actions, [.copyLastText, .restartEngine])
@@ -258,6 +271,21 @@ final class EngineProbeResultTests: XCTestCase {
                                   configuredModel: "parakeet-tdt-0.6b-v3-int8-prepacked", catalog: catalog)
         XCTAssertEqual(r.modelInstalled, true)
         XCTAssertTrue(r.engineUsable)
+    }
+
+    func testDifferentQuantizationIsNotInstalledByPrefix() {
+        // Only `…-v3` is installed; the configured `…-v3-int8` is a different model.
+        let catalog: [String: [String: Bool]] = ["parakeet": ["parakeet-tdt-0.6b-v3": true, "parakeet-tdt-0.6b-v3-int8": false]]
+        let r = EngineProbeResult(binaryInstalled: true, configuredEngine: "parakeet", configuredModel: "parakeet-tdt-0.6b-v3-int8",
+                                  catalog: catalog, localModelEntries: ["parakeet-tdt-0.6b-v3"])
+        XCTAssertEqual(r.modelInstalled, false)
+        // Its packaged variant is still not the other quantization.
+        let packaged = EngineProbeResult(binaryInstalled: true, configuredEngine: "parakeet",
+                                         configuredModel: "parakeet-tdt-0.6b-v3-int8-prepacked", catalog: catalog)
+        XCTAssertEqual(packaged.modelInstalled, false)
+        // Not in any catalog and no packaged match: unknown, not a prefix guess.
+        XCTAssertNil(EngineProbeResult(binaryInstalled: true, configuredEngine: "parakeet", configuredModel: "parakeet-tdt-0.6b-v3-int8-custom",
+                                       catalog: catalog).modelInstalled)
     }
 
     func testKnownCatalogModelNotInstalled() {
