@@ -84,55 +84,35 @@ enum VoxtypeModel {
     }
 
     /// Streams parsed download progress events as they arrive. Line parsing lives in
-    /// `PopcornCore.ModelDownloadProgress`, unit-tested against fixture lines. Drains stderr (to
-    /// avoid the child blocking on a full pipe - L-5) and keeps the last parsed JSON error, which
-    /// is more specific than a bare exit status.
+    /// `PopcornCore.ModelDownloadProgress`, unit-tested against fixture lines. Runs through
+    /// `ProcessRunner` (L-5 / review-1 cleanup #1: one process runner for the whole app, always
+    /// draining both pipes - a chatty child can no longer block on a full stderr pipe the way the
+    /// old hand-rolled version risked), and keeps the last parsed JSON error, which is more
+    /// specific than a bare exit status.
     static func streamDownload(_ name: String, onEvent: @escaping @Sendable (ModelDownloadEvent) -> Void) throws {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             throw Failure(message: "Voxtype is not installed at \(bin)")
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = ["setup", "--download", "--model", name, "--progress-format", "json", "--quiet"]
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        task.standardOutput = outPipe
-        task.standardError = errPipe
-        var buffer = Data()
         let lastErrorLock = NSLock()
         var lastError: String?
-        outPipe.fileHandleForReading.readabilityHandler = { handle in
-            buffer.append(handle.availableData)
-            while let range = buffer.range(of: Data([0x0A])) {
-                let lineData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
-                buffer.removeSubrange(buffer.startIndex..<range.upperBound)
-                guard let line = String(data: lineData, encoding: .utf8),
-                      let event = ModelDownloadProgress.parse(line: line) else { continue }
+        let result: ProcessRunner.Result
+        do {
+            result = try ProcessRunner.run(
+                bin, ["setup", "--download", "--model", name, "--progress-format", "json", "--quiet"],
+                stdout: .discard, stderr: .discard
+            ) { line in
+                guard let event = ModelDownloadProgress.parse(line: line) else { return }
                 if case .failure(let message) = event {
                     lastErrorLock.lock(); lastError = message; lastErrorLock.unlock()
                 }
                 onEvent(event)
             }
-        }
-        // Drain stderr on its own queue so a chatty child never blocks on a full pipe.
-        let errGroup = DispatchGroup()
-        errGroup.enter()
-        DispatchQueue.global(qos: .utility).async {
-            _ = errPipe.fileHandleForReading.readDataToEndOfFile()
-            errGroup.leave()
-        }
-        do {
-            try task.run()
         } catch {
-            outPipe.fileHandleForReading.readabilityHandler = nil
             throw Failure(message: error.localizedDescription)
         }
-        task.waitUntilExit()
-        outPipe.fileHandleForReading.readabilityHandler = nil
-        errGroup.wait()
-        if task.terminationStatus != 0 {
+        if !result.succeeded {
             lastErrorLock.lock(); let detail = lastError; lastErrorLock.unlock()
-            throw Failure(message: detail ?? "Model download failed (\(task.terminationStatus)).")
+            throw Failure(message: detail ?? "Model download failed (\(result.status)).")
         }
     }
 
@@ -168,35 +148,17 @@ enum VoxtypeModel {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             throw Failure(message: "Voxtype is not installed at \(bin)")
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bin)
-        task.arguments = args
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        task.standardOutput = outPipe
-        task.standardError = errPipe
+        let result: ProcessRunner.Result
         do {
-            try task.run()
+            result = try ProcessRunner.run(bin, args)
         } catch {
             throw Failure(message: error.localizedDescription)
         }
-        // Drain both pipes before waitUntilExit. Waiting first deadlocks when
-        // the child fills a pipe (e.g. `info models --json` or `transcribe`).
-        let errGroup = DispatchGroup()
-        var stderr = ""
-        errGroup.enter()
-        DispatchQueue.global(qos: .utility).async {
-            stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            errGroup.leave()
+        if !result.succeeded {
+            let detail = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw Failure(message: detail.isEmpty ? "voxtype \(args.joined(separator: " ")) failed (\(result.status))" : detail)
         }
-        let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        errGroup.wait()
-        task.waitUntilExit()
-        if task.terminationStatus != 0 {
-            let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Failure(message: detail.isEmpty ? "voxtype \(args.joined(separator: " ")) failed (\(task.terminationStatus))" : detail)
-        }
-        return stdout
+        return result.stdoutText
     }
 
     private struct ModelsJSON: Decodable {

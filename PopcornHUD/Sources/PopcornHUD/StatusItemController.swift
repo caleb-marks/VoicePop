@@ -32,6 +32,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var fixLastMenuItem: NSMenuItem?
     private var watcher: StateWatcher?
     private var health: DictationHealthMonitor?
+    private var statusListenerToken: DictationHealthMonitor.ListenerToken?
+    private var historyAppendedToken: DictationHealthMonitor.ListenerToken?
 
     func start(watcher: StateWatcher, health: DictationHealthMonitor) {
         self.health = health
@@ -55,8 +57,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         // The headline must never say "Ready" while a known issue blocks dictation - drive it
         // from DictationStatus, not from DaemonState alone.
-        health.addListener { [weak self] status in
+        statusListenerToken = health.addListener { [weak self] status in
             self?.apply(status: status)
+        }
+        // Fires after voxtype-clean has actually appended to history.jsonl (unlike the older
+        // transcriptReady signal, which fires first as the HUD's dismiss cue) - L-4's race
+        // between "Fix Last Dictation" and the append is gone rather than merely mitigated.
+        historyAppendedToken = health.addHistoryAppendedListener { [weak self] in
+            self?.reloadFixLastItem()
         }
 
         // Nothing else launches the daemon after a reboot or logout: bring it up
@@ -67,7 +75,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         EngineControl.scheduleMenubarSuppressRetries()
         refreshCachesIfStale(force: true)
         reloadFixLastItem()
-        observeTranscriptReady()
         VoxtypeWarmer.shared.ensureWarm()
     }
 
@@ -83,40 +90,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func stop() {
         EngineControl.cancelMenubarSuppressRetries()
+        if let health, let statusListenerToken { health.removeListener(statusListenerToken) }
+        if let health, let historyAppendedToken { health.removeListener(historyAppendedToken) }
+        statusListenerToken = nil
+        historyAppendedToken = nil
         watcher = nil
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
         }
         statusItem = nil
-        CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque()
-        )
-    }
-
-    /// A finished transcription is exactly when "Fix Last Dictation" needs a fresh title -
-    /// cheaper and more precise than only reloading on idle transitions. `voxtype-clean` posts
-    /// this signal *before* it appends to `history.jsonl` (it's primarily the HUD's dismiss cue),
-    /// so an immediate reload can race the append and read the previous entry (L-4); reload once
-    /// right away in case it already landed, and again shortly after to pick it up if not.
-    private func observeTranscriptReady() {
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let controller = Unmanaged<StatusItemController>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async {
-                    controller.reloadFixLastItem()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        controller.reloadFixLastItem()
-                    }
-                }
-            },
-            VoicePopSignal.transcriptReady as CFString,
-            nil,
-            .deliverImmediately
-        )
     }
 
     // MARK: - State
