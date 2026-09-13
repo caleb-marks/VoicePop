@@ -166,8 +166,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Start Recording does nothing useful when dictation can't currently start (L-10) - offering
     /// it anyway while e.g. the engine isn't running invites a click that has no effect.
     /// Stop Recording (the same item, while hot) is always meaningful, so hot always enables it.
+    ///
+    /// Deliberately narrower than `!lastStatus.canDictate`: today's `canDictate` also goes false
+    /// while any model download is in progress or on the heuristic `permissionsNeeded` guess
+    /// (N2-L5), which would wrongly disable Start Recording during, say, a Settings download of a
+    /// model that isn't even the active one. Scoped to the three issues that truly mean dictation
+    /// cannot start right now. Switch to `lastStatus.canDictate` once WS3 narrows it.
+    private var startRecordingEnabled: Bool {
+        if lastState.isHot { return true }
+        switch lastStatus.issue {
+        case .engineNotInstalled, .modelMissing, .engineNotRunning: return false
+        default: return true
+        }
+    }
+
     private func updateRecordEnabled() {
-        recordMenuItem?.isEnabled = lastState.isHot || lastStatus.canDictate
+        recordMenuItem?.isEnabled = startRecordingEnabled
     }
 
     private static func styleTitle(_ style: Style) -> String {
@@ -427,5 +441,29 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func quitHUD() {
         NSApp.terminate(nil)
+    }
+}
+
+extension StatusItemController: NSMenuItemValidation {
+    /// N2-M1: `NSMenu.autoenablesItems` (default `true`) re-derives every targeted item's
+    /// `isEnabled` right before display, silently discarding whatever the stored property was
+    /// set to elsewhere - confirmed experimentally in review-2, and the reason "disabled" items
+    /// in earlier harness logs were false confidence (they logged the stored property, not what
+    /// AppKit actually validated). Once the target implements this method, AppKit uses its return
+    /// value instead for items with both a target and an action.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem {
+        case recordMenuItem:
+            return startRecordingEnabled
+        case cancelMenuItem:
+            return lastState.isHot
+        case fixLastMenuItem:
+            return !LastHistoryEntryCache.isKnownEmpty()
+        default:
+            if appStyleItems.values.contains(where: { $0 === menuItem }) {
+                return !targetApp.isEmpty
+            }
+            return true
+        }
     }
 }

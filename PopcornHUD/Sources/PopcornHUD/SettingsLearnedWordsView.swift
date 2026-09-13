@@ -108,7 +108,9 @@ struct SettingsLearnedWordsView: View {
                     }
                 }
                 Section {
-                    ForEach(filtered, id: \.from) { entry in
+                    // Index, not \.from (a hand-edited file can have duplicate `from` keys, which
+                    // would otherwise give ForEach duplicate identities).
+                    ForEach(Array(filtered.enumerated()), id: \.offset) { _, entry in
                         row(entry)
                     }
                 }
@@ -192,10 +194,14 @@ final class LearnedWordsViewModel: ObservableObject {
     @Published var saveError: String?
     @Published var quarantineError: String?
 
-    /// Only for validation feedback in the UI and for `filtered`/row display between saves - the
-    /// save path itself always re-reads the file (see `persistMutation`).
+    /// Fallback snapshot for `projectedEntries()` when the file is corrupt - the last known-good
+    /// read, not authoritative.
     private var replacements = Replacements()
-    private var lastMutation: Replacements.Mutation?
+    /// Every edit not yet durably saved, oldest first, replayed in full on the current on-disk
+    /// state at every save attempt (N2-M3). Cleared only once a save actually succeeds - so a
+    /// failed edit is never silently dropped just because a *later* edit happens to save
+    /// successfully, which is what happened when only the most recent mutation was kept.
+    private var pendingMutations: [Replacements.Mutation] = []
 
     func load() {
         switch Replacements.inspect() {
@@ -230,6 +236,9 @@ final class LearnedWordsViewModel: ObservableObject {
         replacements = Replacements()
         entries = []
         loadState = .ready
+        // Replay anything that was queued when the corruption was first hit, onto the now-fresh
+        // (missing) file, instead of silently dropping it.
+        flush()
     }
 
     @discardableResult
@@ -237,20 +246,19 @@ final class LearnedWordsViewModel: ObservableObject {
         // Manual entries are normalized the same way learned ones are (L-12): otherwise "Teh" and
         // a later correction-learned "teh" become case-duplicate entries that `apply` treats
         // differently (it matches keys case-insensitively but only stores one canonical `from`).
-        let key = DiffLearner.key(from)
-        if let error = Replacements.validate(from: key, to: to, existing: replacements.entries) {
+        // Trimmed before keying (N2-L3) - DiffLearner.key only strips punctuation, so " teh"
+        // would otherwise be stored with its leading space and never match a learned "teh".
+        let key = DiffLearner.key(from.trimmingCharacters(in: .whitespacesAndNewlines))
+        let trimmedTo = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Validate against the file's current state plus anything already queued (N2-L3), not
+        // the possibly-stale copy loaded when the tab appeared - so a word the correction window
+        // just learned is also caught as a duplicate.
+        if let error = Replacements.validate(from: key, to: trimmedTo, existing: projectedEntries()) {
             return error
         }
         let minCount = StylePrefsCache.current().learning.minCount
-        let entry = Replacement(
-            from: key,
-            to: to.trimmingCharacters(in: .whitespacesAndNewlines),
-            count: max(1, minCount),
-            lastTs: ISO8601DateFormatter().string(from: Date())
-        )
-        replacements.entries.append(entry)
-        entries = replacements.entries
-        persistMutation(.add(entry))
+        let entry = Replacement(from: key, to: trimmedTo, count: max(1, minCount), lastTs: ISO8601DateFormatter().string(from: Date()))
+        enqueue(.add(entry))
         return nil
     }
 
@@ -258,52 +266,81 @@ final class LearnedWordsViewModel: ObservableObject {
     /// edited never flags itself as a duplicate of its own prior key.
     @discardableResult
     func update(original: Replacement, from: String, to: String) -> ReplacementValidationError? {
-        let key = DiffLearner.key(from)
-        if let error = Replacements.validate(from: key, to: to, existing: replacements.entries, excluding: original.from) {
+        let key = DiffLearner.key(from.trimmingCharacters(in: .whitespacesAndNewlines))
+        let trimmedTo = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let error = Replacements.validate(from: key, to: trimmedTo, existing: projectedEntries(), excluding: original.from) {
             return error
         }
-        guard let idx = replacements.entries.firstIndex(where: { $0.from == original.from }) else { return nil }
-        replacements.entries[idx].from = key
-        replacements.entries[idx].to = to.trimmingCharacters(in: .whitespacesAndNewlines)
-        entries = replacements.entries
-        persistMutation(.update(originalFrom: original.from, from: key, to: to))
+        enqueue(.update(originalFrom: original.from, from: key, to: trimmedTo))
         return nil
     }
 
     func delete(_ entry: Replacement) {
-        replacements.entries.removeAll { $0.from == entry.from }
-        entries = replacements.entries
-        persistMutation(.delete(from: entry.from))
+        enqueue(.delete(from: entry.from))
     }
 
-    /// Re-attempts the same edit, re-read against the file's current state (which may have
-    /// changed since the last attempt).
+    /// Re-attempts every still-pending edit, replayed against the file's current state.
     func retrySave() {
-        guard let lastMutation else { return }
-        persistMutation(lastMutation)
+        flush()
     }
 
-    /// Re-inspects the file, refuses (with an error, keeping the in-UI edit) if it is missing-then
-    /// -corrupted or corrupt, otherwise replays `mutation` on top of whatever is actually on disk
-    /// right now and saves that - never the possibly-stale copy this view model loaded earlier.
-    private func persistMutation(_ mutation: Replacements.Mutation) {
-        lastMutation = mutation
+    private func enqueue(_ mutation: Replacements.Mutation) {
+        pendingMutations.append(mutation)
+        entries = projectedEntries()
+        flush()
+    }
+
+    /// The file's current on-disk state (or the last known-good snapshot, if it's corrupt) with
+    /// every queued edit replayed on top - what the UI should show, and what validation should
+    /// check new edits against.
+    private func projectedEntries() -> [Replacement] {
+        var r: Replacements
+        switch Replacements.inspect() {
+        case .ready(let x): r = x
+        case .missing: r = Replacements()
+        case .corrupt: r = replacements
+        }
+        for mutation in pendingMutations { r.apply(mutation) }
+        return r.entries
+    }
+
+    /// Re-inspects the file and replays every pending mutation, in order, on top of whatever is
+    /// actually on disk right now - never a stale copy this view model loaded earlier. Clears the
+    /// queue only once the save actually succeeds (N2-M3); a save failure keeps every pending
+    /// edit, not just the most recent one, so a later successful edit can't silently drop it.
+    private func flush() {
+        guard !pendingMutations.isEmpty else { return }
         var fresh: Replacements
         switch Replacements.inspect() {
         case .corrupt:
-            saveError = "replacements.json can\u{2019}t be read (it changed since Learned Words opened). Close and reopen Learned Words to see the Reveal in Finder / Move Aside options; your edit here is unsaved."
+            // Switch straight to the malformed state instead of an error message telling the
+            // user to "reopen Learned Words" - onAppear skips reloading while saveError is set,
+            // so that instruction was a dead end (N2-L1). The queue and `entries` (already
+            // reflecting the edit) are untouched, so Move Aside and Start Fresh can replay them.
+            loadState = .malformed
+            saveError = nil
             return
         case .missing:
             fresh = Replacements()
         case .ready(let r):
             fresh = r
         }
-        fresh.apply(mutation)
+        let minCount = StylePrefsCache.current().learning.minCount
+        for mutation in pendingMutations {
+            fresh.apply(mutation)
+            // An edited entry's count must not stay below minCount (N2-L3) - otherwise a manually
+            // retargeted word that was originally learned once never applies once minCount > 1.
+            if case .update(_, let from, _) = mutation, let idx = fresh.entries.firstIndex(where: { $0.from == from }) {
+                fresh.entries[idx].count = max(fresh.entries[idx].count, minCount)
+            }
+        }
         do {
             try fresh.save()
             replacements = fresh
             entries = fresh.entries
+            pendingMutations.removeAll()
             saveError = nil
+            loadState = .ready
         } catch {
             saveError = "Couldn\u{2019}t save learned words. \(error.localizedDescription)"
         }
