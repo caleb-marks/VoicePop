@@ -23,12 +23,9 @@ public enum DaemonProcess {
         kill(pid, 0) == 0 || errno == EPERM
     }
 
-    /// Guards against a stale PID file whose number was reused by an unrelated process.
-    /// Unknown names stay accepted so an unexpected lookup failure never hides a live daemon.
+    /// Verify the executable behind the PID, including when process-name lookup fails.
     public static func looksLikeVoxtype(_ pid: Int32) -> Bool {
-        var buf = [CChar](repeating: 0, count: 64)
-        guard proc_name(pid, &buf, UInt32(buf.count)) > 0 else { return true }
-        return String(cString: buf).lowercased().hasPrefix("voxtype")
+        ProcessIdentity.isRunning(pid: pid, executablePath: "/Applications/Voxtype.app/Contents/MacOS/voxtype-bin")
     }
 
     public static func isLive(pidPath: String = Paths.pid) -> Bool {
