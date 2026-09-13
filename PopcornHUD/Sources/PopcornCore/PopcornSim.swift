@@ -125,6 +125,9 @@ public final class PopcornSim {
     private var drawScratch: [KernelBody] = []
     private var heapScratch: [HeapPose] = []
     var heapMotion: HeapMotion
+    /// Landing-only randomness. Kept apart from `rng` so that when the moving pile changes when
+    /// a kernel lands, the launch sequence of every later pop is unaffected.
+    private var landingRng: SeededRNG
     private var hopRefractory: Double = 0
     private var landingsThisStep = 0
     private static let sides: [Double] = [-1, 1]
@@ -137,6 +140,7 @@ public final class PopcornSim {
         }
         var probe = rng
         heapMotion = HeapMotion(seed: probe.nextUInt64())
+        landingRng = SeededRNG(seed: probe.nextUInt64() ^ 0x6C61_6E64_696E_6721)
     }
 
     /// Current heap displacement (not interpolated).
@@ -146,6 +150,7 @@ public final class PopcornSim {
         if let seed { rng = SeededRNG(seed: seed) }
         var probe = rng
         heapMotion.reset(seed: probe.nextUInt64())
+        landingRng = SeededRNG(seed: probe.nextUInt64() ^ 0x6C61_6E64_696E_6721)
         hopRefractory = 0
         heapScratch.removeAll(keepingCapacity: true)
         kernels.removeAll(keepingCapacity: true)
@@ -443,6 +448,9 @@ public final class PopcornSim {
                 // Resting on the pile: slide and spin down to a stop, ride the surface as the
                 // pile shifts, and stay free to be knocked by later landings and launches.
                 let target = restingY(k)
+                let slope = (Tunables.heapSurface(x: k.x + 1) - Tunables.heapSurface(x: k.x - 1)) / 2
+                // Sliding friction: only a kernel already moving slips downhill; a stopped one sticks.
+                if abs(k.vx) > 1.5 { k.vx += slope * Tunables.restingSlopePull * dt }
                 k.vy += (Tunables.restingStiffness * (target - k.y) - Tunables.restingDamping * k.vy) * dt
                 k.vx *= exp(-Tunables.restingSlideDrag * dt)
                 k.rotV *= exp(-Tunables.restingSpinDrag * dt)
@@ -490,7 +498,7 @@ public final class PopcornSim {
                     k.vx = max(-40, min(40, k.vx * 0.35))
                     k.rotV *= 0.3
                     k.nestle = Double((k.id &* 2_654_435_761) % 1000) / 1000 * Tunables.restingNestleMax
-                    k.maxLife = k.life + rng.next(in: 0.7...1.4)
+                    k.maxLife = k.life + landingRng.next(in: 0.7...1.4)
                 } else {
                     k.vy *= -retain
                     k.vx *= 0.62
