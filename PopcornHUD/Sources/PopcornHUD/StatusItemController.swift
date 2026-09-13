@@ -404,6 +404,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             NotificationCenter.default.post(name: .voicePopStylePrefsDidChange, object: nil)
         } catch {
             fputs("VoicePop: style.json save failed: \(error)\n", stderr)
+            // A menu Writing Style change failing silently (R3-L2) was worse than a brief alert -
+            // Settings shows the same failure inline with Retry, but the menu has nowhere inline
+            // to put it.
+            let alert = NSAlert()
+            alert.messageText = "Couldn\u{2019}t save writing style"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
         if OllamaWarmer.formalInEffect(prefs) { OllamaWarmer.shared.ensureWarm(prefs.llm) }
     }
