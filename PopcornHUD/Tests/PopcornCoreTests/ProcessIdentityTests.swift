@@ -40,13 +40,30 @@ final class DaemonIdentityTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    /// A copy of a system tool at `relativePath`, standing in for a Voxtype build at another location.
-    private func launchCopy(of tool: String, at relativePath: String, _ args: [String]) throws -> Process {
+    /// A tiny idle program compiled once per test run. Copies of platform binaries (/bin/sleep,
+    /// /bin/bash) are killed at launch on some hosts even after ad-hoc re-signing, so the stand-in
+    /// for a Voxtype build is our own Mach-O, which runs from any path.
+    private static let idleFixture: Result<URL, Error> = {
+        Result {
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("voicepop-idle-fixture-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let source = dir.appendingPathComponent("idle.c")
+            let binary = dir.appendingPathComponent("idle")
+            try "#include <unistd.h>\nint main(int argc, char **argv) { (void)argc; (void)argv; for (;;) pause(); }\n"
+                .write(to: source, atomically: true, encoding: .utf8)
+            let build = try ProcessRunner.run("/usr/bin/xcrun", ["clang", "-O0", "-o", binary.path, source.path], timeout: 120)
+            guard build.succeeded else { throw XCTSkip("idle fixture did not compile: \(build.stderrText)") }
+            return binary
+        }
+    }()
+
+    /// A copy of the idle fixture at `relativePath`, standing in for a Voxtype build at another location.
+    /// Arguments are ignored by the fixture but remain visible to process inspection.
+    private func launchCopy(at relativePath: String, _ args: [String]) throws -> Process {
+        let fixture = try Self.idleFixture.get()
         let url = dir.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(atPath: tool, toPath: url.path)
-        // A moved platform binary is killed at launch; an ad-hoc signature makes the copy runnable.
-        XCTAssertTrue(try ProcessRunner.run("/usr/bin/codesign", ["-f", "-s", "-", url.path], timeout: 20).succeeded)
+        try FileManager.default.copyItem(at: fixture, to: url)
         let p = Process()
         p.executableURL = url
         p.arguments = args
@@ -60,8 +77,8 @@ final class DaemonIdentityTests: XCTestCase {
     }
 
     func testVoxtypeAtAnotherInstallLocationIsRecognized() throws {
-        let brew = try launchCopy(of: "/bin/sleep", at: "homebrew/bin/voxtype", ["30"])
-        let bundle = try launchCopy(of: "/bin/sleep", at: "Users/me/Applications/Voxtype.app/Contents/MacOS/voxtype-helper", ["30"])
+        let brew = try launchCopy(at: "homebrew/bin/voxtype", ["daemon"])
+        let bundle = try launchCopy(at: "Users/me/Applications/Voxtype.app/Contents/MacOS/voxtype-helper", ["daemon"])
         defer { [brew, bundle].forEach { $0.terminate(); $0.waitUntilExit() } }
         XCTAssertTrue(DaemonProcess.looksLikeVoxtype(brew.processIdentifier))
         XCTAssertTrue(DaemonProcess.looksLikeVoxtype(bundle.processIdentifier))
@@ -95,9 +112,8 @@ final class DaemonIdentityTests: XCTestCase {
     }
 
     func testLiveDaemonScanFindsProcessesWithoutPIDFiles() throws {
-        // `bash -c …` (/bin/sh re-execs another shell) parses like `voxtype -c <config>`: a daemon invocation with no subcommand.
-        // The trailing `:` keeps bash from exec-ing sleep, so the process stays `voxtype-bin`.
-        let daemon = try launchCopy(of: "/bin/bash", at: "dev/voxtype-bin", ["-c", "sleep 30; :"])
+        // `voxtype-bin -c <config>` parses as a daemon invocation with no subcommand.
+        let daemon = try launchCopy(at: "dev/voxtype-bin", ["-c", "/tmp/record.toml"])
         defer { daemon.terminate(); daemon.waitUntilExit() }
         XCTAssertEqual(ProcessIdentity.arguments(pid: daemon.processIdentifier)?.dropFirst().first, "-c")
         let pids = DaemonProcess.liveDaemonPIDs()
