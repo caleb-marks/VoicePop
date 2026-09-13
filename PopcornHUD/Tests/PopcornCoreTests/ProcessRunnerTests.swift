@@ -47,6 +47,22 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertEqual(r.stdoutText, "a\nb\nc")
     }
 
+    func testNoLinesAreDeliveredAfterReturn() throws {
+        // A grandchild keeps stdout open and keeps printing after the child exits.
+        var lines: [String] = []
+        let lock = NSLock()
+        let r = try ProcessRunner.run("/bin/bash", ["-c", "(for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do echo late$i; sleep 0.1; done) & echo early"],
+                                      timeout: 5, stdout: .discard) { line in
+            lock.lock(); lines.append(line); lock.unlock()
+        }
+        XCTAssertTrue(r.succeeded)
+        lock.lock(); let atReturn = lines.count; lock.unlock()
+        usleep(600_000)
+        lock.lock(); let later = lines.count; lock.unlock()
+        XCTAssertEqual(atReturn, later, "lines arriving after return must be dropped")
+        XCTAssertEqual(lines.first, "early")
+    }
+
     func testLaunchFailureThrows() {
         XCTAssertThrowsError(try ProcessRunner.run("/nonexistent/voxtype-bin", ["info"], timeout: 1))
         XCTAssertFalse(ProcessRunner.spawnDetached("/nonexistent/voxtype-bin"))

@@ -15,7 +15,7 @@ final class AudioFrameTests: XCTestCase {
     func testFragmentedBuffer() {
         let f1 = AudioFrame(seq: 1, min: 0.1, max: 0.2, peakDbfs: -12)
         let f2 = AudioFrame(seq: 2, min: -0.3, max: 0.1, peakDbfs: -10)
-        var all = f1.encode() + f2.encode()
+        let all = f1.encode() + f2.encode() // polish-shared: WS3 fixed the var→let warning (review-2)
         let buf = AudioFrameBuffer()
         let part1 = Array(all.prefix(10))
         let part2 = Array(all.dropFirst(10))
