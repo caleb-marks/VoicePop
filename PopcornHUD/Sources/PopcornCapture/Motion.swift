@@ -113,9 +113,9 @@ enum MotionCapture {
         saveSheet(pileOnly(window("syllables", skip: 30)), columns: 6, crop: pileCrop, scale: 4, to: "\(outDir)/sheet-syllables-pileonly.png")
         saveSheet(pileOnly(window("pause", skip: 0, count: 60).enumerated().filter { $0.offset % 2 == 0 }.map(\.element)),
                   columns: 6, crop: pileCrop, scale: 4, to: "\(outDir)/sheet-pause-pileonly-every4th.png")
-        // Decorative pieces alone, every frame for half a second of accents: rocking and hops.
+        // Decorative pieces alone, every other frame through syllables: rocking and hops.
         let heapOnly = window("syllables", skip: 60, count: 36).map { var s = $0; s.kernels = []; return s }
-        saveSheet(heapOnly, columns: 6, crop: pileCrop, scale: 4, to: "\(outDir)/sheet-accents-heaponly.png")
+        saveSheet(heapOnly, columns: 6, crop: pileCrop, scale: 4, to: "\(outDir)/sheet-syllables-heaponly.png")
         saveSheet(rm.enumerated().filter { $0.offset % 3 == 0 }.map(\.element), columns: 6,
                   crop: heapCrop, scale: 3, to: "\(outDir)/sheet-reducemotion.png")
 
