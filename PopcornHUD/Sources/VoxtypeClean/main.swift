@@ -69,13 +69,16 @@ enum VoxtypeCleanMain {
             "ms": String((Timing.nowUs() - startedUs) / 1000),
         ])
         // The HUD's dismiss signal: fires before the daemon types the first character.
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(rawValue: VoicePopSignal.transcriptReady as CFString),
-            nil,
-            nil,
-            true
-        )
+        // VOICEPOP_NO_SIGNAL=1 keeps fixture runs from reaching a live HUD.
+        if env["VOICEPOP_NO_SIGNAL"] != "1" {
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(rawValue: VoicePopSignal.transcriptReady as CFString),
+                nil,
+                nil,
+                true
+            )
+        }
         FileHandle.standardOutput.write(payload)
         try? FileHandle.standardOutput.close()
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

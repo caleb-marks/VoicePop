@@ -265,6 +265,47 @@ final class DaemonStateObserverTests: XCTestCase {
         XCTAssertFalse(DaemonProcess.looksLikeVoxtype(f.child!.processIdentifier))
     }
 
+    func testRapidStartStopCancelWritesSettleOnFinalStateWithoutMissingFlashes() throws {
+        let f = try DaemonFixture()
+        try f.launchDaemon(state: "idle")
+        let o = makeObserver(f)
+        let r = StateRecorder()
+        r.attach(o)
+        o.start()
+        defer { o.stop() }
+        waitFor(r, .idle)
+        let cycle = ["recording", "idle", "recording", "transcribing", "recording", "idle"]
+        for i in 0..<60 {
+            f.writeState(cycle[i % cycle.count])
+            usleep(UInt32.random(in: 0...3000))
+        }
+        f.writeState("transcribing")
+        waitFor(r, .transcribing)
+        spin(0.1)
+        XCTAssertEqual(r.values.last, .transcribing)
+        XCTAssertFalse(r.values.dropFirst().contains(.missing), "truncate windows must never surface as missing")
+        XCTAssertEqual(o.diagnostics().fallbackWakeups, 0)
+    }
+
+    func testReconcileNowIsCheapAndSilentWhenNothingChanged() throws {
+        let f = try DaemonFixture()
+        try f.launchDaemon(state: "recording")
+        let o = makeObserver(f)
+        let r = StateRecorder()
+        r.attach(o)
+        o.start()
+        defer { o.stop() }
+        waitFor(r, .recording)
+        let reads = o.diagnostics().stateReads
+        let count = r.values.count
+        o.reconcileNow()
+        o.waitUntilIdle()
+        spin(0.05)
+        XCTAssertEqual(r.values.count, count)
+        XCTAssertEqual(o.diagnostics().stateReads, reads + 1)
+        XCTAssertEqual(o.diagnostics().openDescriptors, 3, "no descriptor churn when inodes are unchanged")
+    }
+
     func testIdleUnchangedDoesNoReadsCallbacksOrTimers() throws {
         let f = try DaemonFixture()
         try f.launchDaemon(state: "idle")
