@@ -35,14 +35,19 @@ DEVICE="$(hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG" | tail 
 [[ -n "$DEVICE" ]] || { echo "ERROR: could not identify mounted DMG device" >&2; exit 1; }
 verify_app_contents "$MOUNT/VoicePop.app" DMG
 
-find "$WORK/zip" "$MOUNT" -type f -perm -111 -print0 | while IFS= read -r -d '' binary; do
-  if strings "$binary" \
-      | grep -E '/Users/|/home/' \
+# Note: no pipe into `while` here. `exit 1` inside a piped loop only exits the
+# subshell, so the check would report an error yet let the release continue.
+leaked=0
+while IFS= read -r -d '' binary; do
+  # grep -a, not strings: macOS strings skips the symbol-table string pool, which is
+  # exactly where the linker stores absolute object-file paths.
+  if grep -a -o -E '/(Users|home)/[A-Za-z0-9_.-]+[^[:cntrl:]]*' "$binary" \
       | grep -vF '/Users/runner/work/ort-artifacts/' >/dev/null; then
     echo "ERROR: executable contains an absolute user home path: $binary" >&2
-    exit 1
+    leaked=1
   fi
-done
+done < <(find "$WORK/zip" "$MOUNT" -type f -perm -111 -print0)
+[[ "$leaked" -eq 0 ]] || exit 1
 
 codesign --verify --deep --strict "$WORK/zip/VoicePop.app"
 codesign --verify --deep --strict "$MOUNT/VoicePop.app"
