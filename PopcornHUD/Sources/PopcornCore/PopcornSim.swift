@@ -1,11 +1,5 @@
 import Foundation
 
-public struct Vec2: Equatable, Sendable {
-    public var x: Double
-    public var y: Double
-    public init(_ x: Double, _ y: Double) { self.x = x; self.y = y }
-}
-
 public struct KernelBody: Equatable, Sendable {
     public var id: UInt64 = 0
     public var front: Bool = false
@@ -38,14 +32,13 @@ public struct SimSnapshot: Equatable, Sendable {
     public var kick: Double
     public var phase: Double
     public var bagVisible: Double // 1 = full bag, 0 = collapsed
-    public var levelsUnavailable: Bool
     /// Displacement of each `HeapSeed.pieces` entry, interpolated like the kernels. Empty means
     /// every piece is at rest.
     public var heap: [HeapPose]
 
     public init(
         kernels: [KernelBody], heat: Double, mood: Double, kick: Double, phase: Double,
-        bagVisible: Double, levelsUnavailable: Bool, heap: [HeapPose] = []
+        bagVisible: Double, heap: [HeapPose] = []
     ) {
         self.heap = heap
         self.kernels = kernels
@@ -54,7 +47,6 @@ public struct SimSnapshot: Equatable, Sendable {
         self.kick = kick
         self.phase = phase
         self.bagVisible = bagVisible
-        self.levelsUnavailable = levelsUnavailable
     }
 }
 
@@ -605,7 +597,6 @@ public final class PopcornSim {
             kick: kickOut,
             phase: phase,
             bagVisible: bagVisible,
-            levelsUnavailable: levelsUnavailable,
             heap: heapScratch
         )
     }

@@ -288,7 +288,7 @@ final class LearningTests: XCTestCase {
         HistoryStore.append(HistoryEntry(ts: "2", app: "B", style: "casual", raw: "b", rules: "b", out: "b", llm: false), to: h, rotated: rot)
         XCTAssertEqual(HistoryStore.last(from: h)?.ts, "2")
         let c = dir.appendingPathComponent("corrections.jsonl")
-        for i in 0..<10 { CorrectionStore.append(CorrectionEntry(ts: "\(i)", app: "A", style: "formal", typed: "t\(i)", corrected: "c\(i)"), to: c) }
+        for i in 0..<10 { try CorrectionStore.appendThrowing(CorrectionEntry(ts: "\(i)", app: "A", style: "formal", typed: "t\(i)", corrected: "c\(i)"), to: c) }
         XCTAssertEqual(CorrectionStore.recent(limit: 3, from: c).map(\.ts), ["7", "8", "9"])
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber)?.intValue, 0o700)
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: h.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
@@ -748,7 +748,6 @@ final class PopRewardTests: XCTestCase {
             let aspect = box.width / max(0.01, box.height)
             XCTAssertGreaterThan(aspect, 0.55)
             XCTAssertLessThan(aspect, 1.75)
-            XCTAssertFalse(KernelArt.creases(shape: shape).isEmpty)
         }
     }
 

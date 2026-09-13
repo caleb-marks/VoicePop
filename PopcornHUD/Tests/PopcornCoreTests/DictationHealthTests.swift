@@ -146,7 +146,7 @@ final class DictationSessionTrackerTests: XCTestCase {
     }
 
     func testCopyEvidenceRequiresAnEntryNewerThanTheSessionBaseline() {
-        let start = TimingReport.parseWall("2026-09-12T12:00:01.500Z")!
+        let start = ISO8601DateFormatter().date(from: "2026-09-12T12:00:01Z")!.addingTimeInterval(0.5)
         let previous = entry("2026-09-12T12:00:01Z", "dictation A")
         // Back-to-back: A was appended at 12:00:01.1, B started at 12:00:01.5 and failed.
         XCTAssertFalse(DictationSessionTracker.historyEntry(previous, isFromSessionStartedAt: start,

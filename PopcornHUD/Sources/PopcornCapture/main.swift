@@ -122,7 +122,7 @@ struct PopcornCapture {
         if mascot == .beagle {
             // Fixed levels (not simulated) keep the beagle stills comparable across renderer changes.
             func still(_ level: Double) -> PopcornRenderer.SceneInput {
-                scene(SimSnapshot(kernels: [], heat: level, mood: level, kick: 0, phase: 0, bagVisible: 1, levelsUnavailable: false),
+                scene(SimSnapshot(kernels: [], heat: level, mood: level, kick: 0, phase: 0, bagVisible: 1),
                       reduceMotion: true, mascot: .beagle)
             }
             specials = [("quiet-reducemotion", still(0.035)), ("loud-reducemotion", still(0.28))]

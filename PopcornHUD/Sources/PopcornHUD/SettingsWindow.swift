@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import PopcornCore
 
 enum SettingsSection: String, CaseIterable {
     case general, appearance, dictation, learnedWords

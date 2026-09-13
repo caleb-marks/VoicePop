@@ -3,7 +3,6 @@ import PopcornCore
 
 /// Same 🍿 used for the app icon, Dock, and menu bar. Menu bar follows `Mascot`.
 enum StatusItemIcon {
-    static let emoji = "🍿"
     /// Shared with `scripts/generate-app-icon.swift`. Apple Color Emoji bitmaps cap ~160 px.
     static let emojiScale: CGFloat = 0.92
 

@@ -235,15 +235,7 @@ public struct CorrectionEntry: Codable, Equatable {
 }
 
 public enum CorrectionStore {
-    public static func append(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) {
-        do {
-            try appendThrowing(e, to: url)
-        } catch {
-            fputs("VoicePop: corrections append failed: \(error)\n", stderr)
-        }
-    }
-
-    /// Throwing sibling of `append`, for callers (the correction window) that must show the user
+    /// Throws, for callers (the correction window) that must show the user
     /// an actionable error instead of silently swallowing it.
     public static func appendThrowing(_ e: CorrectionEntry, to url: URL = VoicePopPaths.corrections) throws {
         try VoicePopPaths.ensureDir()

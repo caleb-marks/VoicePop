@@ -103,22 +103,6 @@ public enum ProcessRunner {
         return Result(status: task.terminationStatus, stdout: outBox.data, stderr: errBox.data, timedOut: timedOut)
     }
 
-    /// Runs on a utility queue and delivers the result (or launch error) on `queue`.
-    public static func runAsync(
-        _ executable: String,
-        _ arguments: [String] = [],
-        timeout: TimeInterval? = nil,
-        stdout: Output = .discard,
-        stderr: Output = .discard,
-        queue: DispatchQueue = .main,
-        completion: @escaping (Swift.Result<Result, Error>) -> Void
-    ) {
-        DispatchQueue.global(qos: .utility).async {
-            let outcome = Swift.Result { try run(executable, arguments, timeout: timeout, stdout: stdout, stderr: stderr) }
-            queue.async { completion(outcome) }
-        }
-    }
-
     /// Fire-and-forget with both outputs discarded. Returns false when the launch fails.
     @discardableResult
     public static func spawnDetached(_ executable: String, _ arguments: [String] = []) -> Bool {

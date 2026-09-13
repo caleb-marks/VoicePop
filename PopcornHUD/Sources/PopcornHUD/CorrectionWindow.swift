@@ -18,10 +18,8 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     private var entry: HistoryEntry?
     private var textView: NSTextView?
     private var rawLabel: NSTextField?
-    private var explainLabel: NSTextField?
     private var errorLabel: NSTextField?
     private var retryButton: NSButton?
-    private var saveButton: NSButton?
     private var built = false
     /// One saver per presented entry: it remembers which correction record it already appended,
     /// so pressing Save again after a failure (Retry) never writes a duplicate.
@@ -164,7 +162,6 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         explain.textColor = .tertiaryLabelColor
         explain.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(explain)
-        explainLabel = explain
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
@@ -215,7 +212,6 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         save.keyEquivalentModifierMask = .command
         save.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(save)
-        saveButton = save
 
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),

@@ -47,8 +47,6 @@ enum VoxtypeModel {
         model.hasPrefix("parakeet") ? "parakeet" : "whisper"
     }
 
-    static let nameGlossary = "VoicePop, Voxtype, Ghostty, NVIDIA Parakeet, Codex, Claude Code, Rust, Cursor."
-
     /// True when `id` (an installed/current model name from the engine, possibly with a
     /// packaging suffix such as `-prepacked`) refers to the same model as `catalogID`. One
     /// definition, shared with health probes and setup: `PopcornCore.ModelIdentity`.
@@ -117,10 +115,6 @@ enum VoxtypeModel {
         let engine = engine(for: name)
         _ = try run(["config", "set", "engine", engine])
         _ = try run(["config", "set", "\(engine).model", name])
-    }
-
-    static func setNameGlossary() throws {
-        _ = try run(["config", "set", "whisper.initial_prompt", nameGlossary])
     }
 
     static func warm() {

@@ -34,6 +34,4 @@ public struct SeededRNG: Sendable {
         let span = range.upperBound - range.lowerBound + 1
         return range.lowerBound + Int(nextUInt64() % UInt64(span))
     }
-
-    public mutating func nextBool() -> Bool { nextDouble() < 0.5 }
 }
