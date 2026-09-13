@@ -29,7 +29,16 @@ enum UISnapshotHarness {
 
         let logURL = outDir.appendingPathComponent("harness-log.txt")
         try? log.joined(separator: "\n").write(to: logURL, atomically: true, encoding: .utf8)
+        let failures = log.filter { $0.hasPrefix("FAIL") }
         fputs("VoicePop UI snapshot harness: wrote \(outDir.path)\n", stderr)
+        // A scripted run or reviewer checking only the exit code must see a broken guarantee
+        // (R3-L4) - logging "FAIL" and still exiting 0 (the previous behavior, a regression from
+        // replacing fatalError/precondition with log lines) reports success either way.
+        if !failures.isEmpty {
+            fputs("VoicePop UI snapshot harness: \(failures.count) FAIL line(s):\n", stderr)
+            for failure in failures { fputs("  \(failure)\n", stderr) }
+            exit(1)
+        }
     }
 
     // MARK: - Fixtures
@@ -90,9 +99,20 @@ enum UISnapshotHarness {
         }
         text.string = "Edited by the harness."
         editor.textDidChange(Notification(name: NSText.didChangeNotification, object: text))
+        // Wait for the real present() -> refreshAsync -> presentResolved chain to actually
+        // finish (R3-L4), rather than guessing a fixed delay that could pass before the code
+        // under test has run.
+        var resolved = false
+        editor.onPresentResolved = { resolved = true }
         editor.present()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        if text.string == "Edited by the harness." {
+        let deadline = Date().addingTimeInterval(5)
+        while !resolved, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        editor.onPresentResolved = nil
+        if !resolved {
+            log.append("FAIL: reopening correction for the same entry timed out waiting for presentResolved")
+        } else if text.string == "Edited by the harness." {
             log.append("PASS: reopening correction for the same entry preserves the edited text")
         } else {
             log.append("FAIL: reopening correction for the same entry discarded edits (got \"\(text.string)\")")
@@ -183,6 +203,14 @@ enum UISnapshotHarness {
         capture(name: "settings-dictation-failed", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
             SettingsDictationView(store: SettingsStore(), fixtureModels: failed)
         }
+
+        // R3-L2: a style save failure must be visible without scrolling, not only below "Local
+        // AI polishing" at the bottom of a 620pt window.
+        let saveErrorStore = SettingsStore()
+        saveErrorStore.saveError = "The disk is full."
+        capture(name: "settings-dictation-saveerror", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
+            SettingsDictationView(store: saveErrorStore)
+        }
     }
 
     private static func renderLearnedWords(to outDir: URL, log: inout [String]) {
@@ -208,6 +236,15 @@ enum UISnapshotHarness {
         capture(name: "learned-words-malformed", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
             SettingsLearnedWordsView()
         }
+
+        // R3-L1: malformed with a pending edit queued from before the corruption - the state
+        // should say so instead of looking identical to "nothing was ever entered".
+        let malformedWithPending = LearnedWordsViewModel()
+        _ = malformedWithPending.add(from: "deltaword", to: "Delta Word") // fails: file is corrupt, queues
+        capture(name: "learned-words-malformed-pending", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
+            SettingsLearnedWordsView(fixtureModel: malformedWithPending)
+        }
+
         if let saved { try? saved.write(to: url) }
     }
 

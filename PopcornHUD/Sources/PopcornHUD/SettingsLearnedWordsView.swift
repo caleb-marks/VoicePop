@@ -54,6 +54,10 @@ struct SettingsLearnedWordsView: View {
                 .foregroundStyle(.orange)
             Text("The learned-words file is malformed. It hasn\u{2019}t been changed or overwritten.")
                 .foregroundStyle(.secondary)
+            if model.hasPendingEdits {
+                Text("Your unsaved edit will be applied after Move Aside and Start Fresh.")
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Reveal in Finder") { model.revealInFinder() }
                 Button("Move Aside and Start Fresh", role: .destructive) { model.quarantineAndStartFresh() }
@@ -218,18 +222,32 @@ final class LearnedWordsViewModel: ObservableObject {
     /// successfully, which is what happened when only the most recent mutation was kept.
     private var pendingMutations: [Replacements.Mutation] = []
 
+    /// True while an edit made before the file most recently went missing/corrupt/changed
+    /// underneath this tab hasn't been durably saved yet (R3-L1) - shown in the malformed state
+    /// so the user knows an edit is waiting rather than assuming the list is simply empty.
+    var hasPendingEdits: Bool { !pendingMutations.isEmpty }
+
     func load() {
         switch Replacements.inspect() {
-        case .missing:
-            replacements = Replacements()
-            entries = []
-            loadState = .ready
-        case .ready(let r):
-            replacements = r
-            entries = r.entries
-            loadState = .ready
         case .corrupt:
             loadState = .malformed
+            return
+        case .missing:
+            replacements = Replacements()
+        case .ready(let r):
+            replacements = r
+        }
+        // Reflect (and, if possible, finally persist) any edit still queued from before the file
+        // went missing/corrupt/changed underneath this tab (R3-L1) - otherwise `load()` showed
+        // disk contents only, the queued edit became invisible everywhere (the list, and
+        // `projectedEntries()`-based validation still counted it as a duplicate for "already
+        // learned" purposes), and a later unrelated edit could silently save it without the user
+        // ever seeing it land.
+        entries = projectedEntries()
+        if pendingMutations.isEmpty {
+            loadState = .ready
+        } else {
+            flush()
         }
     }
 
