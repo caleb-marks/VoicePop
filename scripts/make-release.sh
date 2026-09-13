@@ -23,14 +23,12 @@ notarize() {
   status="$(plutil -extract status raw -o - "$result")"
   [[ "$status" == Accepted ]] || { echo "Notarization was $status. See $result; use notarytool log with its submission id." >&2; exit 1; }
 }
-# Notarize and staple the helper before sealing the containing app.
-ditto -c -k --keepParent "$HELPER" "$ROOT/dist/notary-helper.zip"
-notarize "$ROOT/dist/notary-helper.zip" "$ROOT/dist/notary-helper.json"
-xcrun stapler staple "$HELPER"
-xcrun stapler validate "$HELPER"
-codesign --force --timestamp --options runtime --sign "$VOICEPOP_SIGN_IDENTITY" "$APP"
+# One submission covers the signed app and its nested helper. Stapling tickets
+# does not require re-signing; preserve the code signatures Apple inspected.
 ditto -c -k --keepParent "$APP" "$ROOT/dist/notary-app.zip"
 notarize "$ROOT/dist/notary-app.zip" "$ROOT/dist/notary-app.json"
+xcrun stapler staple "$HELPER"
+xcrun stapler validate "$HELPER"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 codesign --verify --deep --strict "$APP"
