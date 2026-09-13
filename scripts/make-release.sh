@@ -13,6 +13,7 @@ VOX_PROVENANCE="${VOXTYPE_PROVENANCE:-$(dirname "$VOX_BIN")/VOXTYPE-BUILD.txt}"
   || { echo "ERROR: $VOX_PROVENANCE missing (set VOXTYPE_PROVENANCE)" >&2; exit 1; }
 # Capture first: grep -q closing the pipe early would trip pipefail with SIGPIPE (141).
 grep -q 'compiled  parakeet' <<<"$("$VOX_BIN" info engines)" || { echo 'Engine lacks a compiled Parakeet backend.' >&2; exit 1; }
+swift test --package-path "$ROOT/PopcornHUD"
 VOXTYPE_BIN="$VOX_BIN" VOXTYPE_PROVENANCE="$VOX_PROVENANCE" "$ROOT/scripts/package-app.sh"
 APP="$ROOT/dist/VoicePop.app"
 HELPER="$APP/Contents/Helpers/Voxtype.app"
@@ -51,5 +52,6 @@ cp "$DMG" "$ROOT/dist/VoicePop.dmg"
 ZIP="$ROOT/dist/VoicePop-${VERSION}-macos-arm64.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
+"$ROOT/scripts/verify-release-artifacts.sh"
 (cd "$ROOT/dist" && shasum -a 256 "VoicePop-${VERSION}.dmg" VoicePop.dmg "VoicePop-${VERSION}-macos-arm64.zip" > SHA256SUMS)
 echo "Verified release assets: $DMG, $ZIP, dist/VoicePop.dmg, dist/SHA256SUMS"
