@@ -61,10 +61,21 @@ public struct DictationSessionTracker: Equatable, Sendable {
         return [start, stuck, noTextCheckMs].compactMap { $0 }.min()
     }
 
-    /// Whether a history entry stamped `ts` (ISO-8601, second precision) belongs to a dictation
-    /// that started at `sessionStart` or later.
-    public static func historyEntry(ts: String, isFromSessionStartedAt sessionStart: Date) -> Bool {
-        guard let date = ISO8601DateFormatter().date(from: ts) else { return false }
+    /// Whether `latest` is text from the dictation that started at `sessionStart`.
+    ///
+    /// History timestamps have one-second precision, so a timestamp alone can match the previous
+    /// dictation appended a moment before this one started. `baseline` is the last entry recorded
+    /// when this recording started; the latest entry must differ from it (strictly newer) and not
+    /// predate the session. An unknown baseline (`nil`) never matches: no copy offer without evidence.
+    public static func historyEntry(
+        _ latest: HistoryEntry?,
+        isFromSessionStartedAt sessionStart: Date,
+        baseline: HistorySnapshot?
+    ) -> Bool {
+        guard let latest, let baseline, latest != baseline.last,
+              !latest.out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let date = ISO8601DateFormatter().date(from: latest.ts)
+        else { return false }
         return date >= sessionStart.addingTimeInterval(-1)
     }
 
@@ -147,6 +158,12 @@ public struct DictationSessionTracker: Equatable, Sendable {
             failure = .transcriptionStuck
         }
     }
+}
+
+/// The last history entry seen at a moment (nil `last` = history was empty).
+public struct HistorySnapshot: Equatable {
+    public var last: HistoryEntry?
+    public init(last: HistoryEntry?) { self.last = last }
 }
 
 /// Raw, read-only answers from the installed engine. nil means "could not tell".

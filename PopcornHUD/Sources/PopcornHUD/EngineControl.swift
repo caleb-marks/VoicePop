@@ -41,7 +41,9 @@ enum EngineControl {
     /// Starts the daemon at launch when nothing else did (reboot/logout). Checks run off main.
     static func startIfNotRunning() {
         processQueue.async {
-            guard !VoxtypeDaemon.isLive(), isEngineInstalled else { return }
+            // A daemon without a readable PID file (other install, mid-restart) still counts:
+            // starting another would make FN dictation type twice.
+            guard !VoxtypeDaemon.isLive(), DaemonProcess.liveDaemonPIDs().isEmpty, isEngineInstalled else { return }
             fputs("VoicePop: Voxtype daemon not running at launch; starting it\n", stderr)
             DispatchQueue.main.async { restart() }
         }
