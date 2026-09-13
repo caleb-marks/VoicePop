@@ -163,7 +163,7 @@ struct PopcornCapture {
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", mp4])
         if mascot == .popcorn {
             ffmpeg(["-y", "-framerate", "60", "-i", "\(movieDir)/f_%04d.png",
-                    "-vf", "fps=20,split[s0][s1];[s0]palettegen=max_colors=192:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4",
+                    "-vf", "fps=16,split[s0][s1];[s0]palettegen=max_colors=192:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
                     "\(outDir)/demo-tub.gif"])
         }
         try? FileManager.default.removeItem(atPath: movieDir)
@@ -262,7 +262,7 @@ struct PopcornCapture {
         \(specialArtifacts)
         - `kernel-preview.png` (kernel close-up, light and dark rows)
         - `\(prefix)polish.mp4`: 60 fps deterministic input demo, then the recording → transcribing collapse and one second of the capsule - **not** microphone footage.
-        \(mascot == .popcorn ? "- `demo-tub.gif`: 20 fps README hero derived from the same deterministic frames." : "")
+        \(mascot == .popcorn ? "- `demo-tub.gif`: 16 fps README hero derived from the same deterministic frames." : "")
 
         ## Still required (live)
 
