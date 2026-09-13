@@ -14,12 +14,12 @@ All "current" measurements: Apple M4 MacBook Pro, 16 GB, macOS 26.6.2 (25G83), S
 
 | Measure | Target | Status | Evidence |
 |---|---|---|---|
-| Recording request → visible feedback | p95 ≤ 100 ms | **Not measured live.** State detection is measured (synthetic). | State-file change → listener callback: p95 **1.16 ms** event-driven vs **100.9 ms** for the previous polling watcher. The HUD now publishes its first frame in the same main-queue turn as the state delivery. FN press time is inside Voxtype and not observable; the timing log uses Voxtype's "Recording started" line as a wall-clock proxy. |
+| Recording request → visible feedback | p95 ≤ 100 ms | **Not measured live.** State detection is measured (synthetic). | State-file change → listener callback: p95 **1.29 ms** event-driven vs **97.0 ms** for the previous polling watcher. The HUD now publishes its first frame in the same main-queue turn as the state delivery. FN press time is inside Voxtype and not observable; the timing log uses Voxtype's "Recording started" line as a wall-clock proxy. |
 | Fresh audio-level packet → visible reaction | p95 ≤ 33 ms | **Not measured live.** Instrumented. | `audio.react` timing event (packet arrival → publish that consumed it, ±1 ms). The HUD ticks at display rate and consumes the newest packet each tick, so the design bound is one display interval plus compositor latency. |
-| Frame compute with up to 120 simulated kernels | p95 ≤ 4 ms | **Offscreen measure within target; live not measured.** | Sum of p95s (simulation + scene mapping + 2× offscreen render): **1.5 ms** at loud speech, **2.3–3.8 ms** with 120 forced bodies (range across runs; the 3.8 ms run shared the CPU with a parallel build). Before the polish: 4.8–4.9 ms loud, 5.6–8.6 ms at 120 bodies. Offscreen `ImageRenderer` is not compositor frame time; live `hud.draw`/`hud.tick` need a real session. |
+| Frame compute with up to 120 simulated kernels | p95 ≤ 4 ms | **Offscreen measure within target; live not measured.** | Sum of p95s (simulation + scene mapping + 2× offscreen render), three final runs: **1.4–2.5 ms** at loud speech, **2.3–3.9 ms** with 120 forced bodies. Other apps kept the load average near 2.5 during these runs, which explains the spread. Before the polish: 4.8–4.9 ms loud, 5.6–8.6 ms at 120 bodies. Offscreen `ImageRenderer` is not compositor frame time; live `hud.draw`/`hud.tick` need a real session. |
 | Warm release → complete text, 3–10 s utterances | p95 ≤ 750 ms (report polishing separately) | **Not measured live.** | Fixture runs of `voxtype-clean` only: rules-only 34 ms; polish fallback when Ollama hangs 4.25 s; Ollama down 29 ms. Real polish latency is unmeasured (Ollama was not running). Recognition time inside Voxtype is not included. |
 | Text inserted into the focused app | Confirmed insertion | **Not observable.** | VoicePop cannot see whether another app received text. Nothing claims insertion. Voxtype's `Text typed via CGEvent` line only means keystrokes were posted, and the analyzer labels it as unverified. |
-| Hidden HUD | No HUD rendering or physics | **Met by design; verified by inspection and synthetic idle measure.** | Display link and fallback timer stop, audio socket stops, and the SwiftUI host is detached when hidden. The state observer has no timers when healthy: 10 s idle = **0** reads/wakeups (was 100) and 0.41 ms CPU (was 31.6 ms) in the isolated benchmark. Whole-app idle CPU is not measured. |
+| Hidden HUD | No HUD rendering or physics | **Met by design; verified by inspection and synthetic idle measure.** | Display link and fallback timer stop, audio socket stops, and the SwiftUI host is detached when hidden. The state observer has no timers when healthy: 10 s idle = **0** reads/wakeups (was 100) and 0.45 ms CPU (was 31.6 ms) in the isolated benchmark. Whole-app idle CPU is not measured. |
 | Sustained recording | Bounded CPU, memory, population | **Bounded in simulation; live CPU/memory not measured.** | Unit tests hold population ≤ 120 bodies (≤ 40 resting) and the heap displacement, rotation, and velocity clamps over 60 s of energetic accented speech, and show no emission burst or heap jump after a 10 s stall. Sprite cache is populated once per display scale (estimated ≤ ~4 MB at 2×). |
 
 ## Current measurements
@@ -32,23 +32,25 @@ Fixture: temporary runtime directory, a `/bin/sleep` child as the daemon PID, wr
 
 | Transition | Polling p50 / p95 / max (ms) | Event-driven p50 / p95 / max (ms) |
 |---|---|---|
-| → recording | 42.87 / 100.92 / 101.75 | 1.04 / 1.16 / 1.20 |
-| → transcribing | 3.91 / 8.64 / 8.89 | 0.95 / 1.06 / 1.20 |
-| → idle | 5.67 / 8.64 / 9.11 | 0.92 / 1.07 / 1.19 |
-| Reads over 180 transitions | 9,380 | 357 |
+| → recording | 40.89 / 96.97 / 100.70 | 0.98 / 1.29 / 2.41 |
+| → transcribing | 4.46 / 8.85 / 9.18 | 0.91 / 1.15 / 1.26 |
+| → idle | 4.78 / 8.47 / 8.72 | 0.91 / 1.13 / 3.38 |
+| Reads over 180 transitions | 9,392 | 352 |
 
 No transitions were missed by either implementation.
 
 | Edge case (event-driven) | Detected after |
 |---|---|
-| Truncate + write → recording | 0.58 ms |
-| Atomic rename → transcribing | 0.94 ms |
-| State file deleted → missing | 0.66 ms |
-| State file recreated → idle | 1.17 ms |
-| Daemon exit → missing | 1.34 ms |
-| New daemon PID → idle | 2.70 ms |
-| Runtime directory removed → missing | 0.92 ms |
-| Runtime directory recreated (includes respawning the fake daemon) | 66.0 ms |
+| Truncate + write → recording | 1.05 ms |
+| Atomic rename → transcribing | 1.66 ms |
+| State file deleted → missing | 0.93 ms |
+| State file recreated → idle | 1.23 ms |
+| Daemon exit → missing | 1.23 ms |
+| New daemon PID → idle | 3.00 ms |
+| Runtime directory removed → missing | 0.64 ms |
+| Runtime directory recreated (includes respawning the fake daemon) | 317 ms |
+
+While `/tmp/voxtype` does not exist, the observer watches `/tmp` itself and coalesces those events to one check per 250 ms, so unrelated `/tmp` activity stays cheap. The cost is that a daemon starting from scratch is noticed up to ~250 ms later; recording transitions on a running daemon are unaffected.
 
 100 start/stop cycles: at most 3 watcher descriptors open, 0 after stop, process descriptor count unchanged.
 
@@ -59,15 +61,15 @@ No transitions were missed by either implementation.
 | Measure (ms) | Before polish p50 / p95 | Current p50 / p95 |
 |---|---|---|
 | `advance` @120 Hz | 0.007 / 0.008 | 0.007 / 0.009 |
-| `advance` @60 Hz (2 steps) | 0.012 / 0.019 | 0.013 / 0.021 |
+| `advance` @60 Hz (2 steps) | 0.012 / 0.019 | 0.013 / 0.020–0.021 |
 | Collision @120 Hz | 0.004 / 0.005 | 0.003 / 0.004 |
 | Whole-pile springs @120 Hz (42 pieces) | — | 0.001 / 0.001 |
-| `advance`, forced 120 bodies | 0.018 / 0.021 | 0.018 / 0.021 |
+| `advance`, forced 120 bodies | 0.018 / 0.021 | 0.017–0.018 / 0.020–0.021 |
 | Collision, forced 120 bodies | 0.014 / 0.016 | 0.011 / 0.014 |
-| Render loud scene @1× | 4.52 / 4.80 | 1.32 / 1.64 |
-| Render loud scene @2× | 4.62 / 4.91 | 1.40 / 1.52 |
-| Render forced-120 scene @2× | 5.5 / 5.6–8.6 | 1.6–2.8 / 2.3–3.8 |
-| Kernel sprite cache, cold prewarm @1× (one time, background) | — | ~50–100 ms |
+| Render loud scene @1× | 4.52 / 4.80 | 1.27–1.29 / 1.42–1.46 |
+| Render loud scene @2× | 4.62 / 4.91 | 1.32–1.36 / 1.41–2.45 |
+| Render forced-120 scene @2× | 5.5 / 5.6–8.6 | 1.9–2.7 / 2.3–3.9 |
+| Kernel sprite cache, cold prewarm @1× (one time, background) | — | 97–98 ms |
 
 Simulation was never the bottleneck (collision ≈ 0.014 ms at 120 bodies), so no broad-phase grid was added. The cost was per-kernel vector drawing (about 15 drawing operations and two transparency layers per kernel), which pre-painted kernel sprites replaced. The HUD prewarms sprites off the main thread at launch for each display scale.
 
