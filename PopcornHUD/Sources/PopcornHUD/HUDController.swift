@@ -42,6 +42,8 @@ final class HUDController {
     private var lastPublishMonoMs: UInt64 = 0
     private var mascot: Mascot = .popcorn
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    /// Rounded-up backing scales whose kernel sprites were already prewarmed (main thread).
+    private var prewarmedScales: Set<Int> = []
     private var health: DictationHealthMonitor?
 
     // Recording session bookkeeping (main thread).
@@ -83,6 +85,7 @@ final class HUDController {
         observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification) { [weak self] _ in
             guard let self else { return }
             self.positionPanel()
+            self.prewarmSprites()
             // The display link was bound to the displays active when it started.
             self.restartAnimationClock(reason: "screens")
         }
@@ -124,10 +127,28 @@ final class HUDController {
         )
 
         buildPanel()
+        prewarmSprites()
         watcher.addListener { [weak self] state in
             self?.handleState(state)
         }
         fputs("VoicePop started\n", stderr)
+    }
+
+    /// Paints kernel sprites for each connected display scale off main, so the first recording
+    /// frame does not rasterize them. The sprite cache is lock-protected and a cold cache still
+    /// draws correctly (painting on demand), so this only moves work earlier.
+    private func prewarmSprites() {
+        let scales = Set(NSScreen.screens.map { Int($0.backingScaleFactor.rounded(.up)) })
+            .subtracting(prewarmedScales)
+        guard !scales.isEmpty else { return }
+        prewarmedScales.formUnion(scales)
+        DispatchQueue.global(qos: .utility).async {
+            for scale in scales.sorted(by: >) {
+                let start = Timing.nowUs()
+                PopcornRenderer.prewarmKernelSprites(displayScale: CGFloat(scale))
+                Timing.event("hud.prewarm", ["scale": String(scale), "ms": String((Timing.nowUs() - start) / 1000)])
+            }
+        }
     }
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name, _ block: @escaping (Notification) -> Void) {
