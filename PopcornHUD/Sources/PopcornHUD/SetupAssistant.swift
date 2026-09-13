@@ -85,15 +85,16 @@ enum SetupAssistant {
         return ModelIdentity.isInstalled(modelName, in: VoxtypeModel.installedNames())
     }
 
-    /// The model setup should download: the configured catalog model when the user chose one
-    /// (downloaded without changing the selection), otherwise the default Parakeet model, which is
-    /// also activated.
+    /// The model setup should download: whatever model Voxtype is configured to load (downloaded
+    /// without changing the selection), or the default Parakeet model, activated, when nothing
+    /// usable is configured.
     static func modelToInstall() -> (name: String, activate: Bool) {
-        if let configured = EngineProbe.probe().configuredModel,
-           let choice = VoxtypeModel.catalog.first(where: { ModelIdentity.same($0.id, configured) }) {
-            return (choice.id, false)
-        }
-        return (modelName, true)
+        guard let configured = EngineProbe.probe().configuredModel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !configured.isEmpty, !configured.hasPrefix("/")
+        else { return (modelName, true) }
+        // Keep the user's choice, including engine model names VoicePop's catalog doesn't list.
+        let name = VoxtypeModel.catalog.first(where: { ModelIdentity.same($0.id, configured) })?.id ?? configured
+        return (name, false)
     }
 
     private static func isParakeetCapable(_ bin: String) -> Bool {
