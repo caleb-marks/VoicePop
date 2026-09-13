@@ -34,9 +34,10 @@ enum UISnapshotHarness {
     // MARK: - Fixtures
 
     /// Writes fixture data into `VOICEPOP_CONFIG_DIR` (set by the caller - see the report for the
-    /// exact invocation). Never touches live user data: `VoicePopPaths.dir` only honors the
-    /// override, so this is a no-op against the real `~/.config/voicepop` if the env var is unset
-    /// (in which case the harness should not be run at all - the caller is responsible for that).
+    /// exact invocation). `App.swift`'s harness entry point refuses to run at all unless
+    /// `VOICEPOP_CONFIG_DIR` is set to something other than the real `~/.config/voicepop`, so by
+    /// the time this runs the override is already guaranteed - this function does not re-check it
+    /// and would overwrite live data if that guard were ever bypassed.
     private static func seedFixtures() {
         var style = StylePrefs()
         style.global = .casual
@@ -70,11 +71,15 @@ enum UISnapshotHarness {
     private static func renderSettingsGeneral(to outDir: URL, log: inout [String]) {
         let healthy = DictationStatus(daemon: .idle, facts: EngineFacts(modelInstalled: true))
         let issue = DictationStatus(daemon: .missing, facts: EngineFacts())
+        let healthyStore = SettingsStore()
+        healthyStore.status = healthy
         capture(name: "settings-general-healthy", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
-            SettingsGeneralView(store: SettingsStore(), health: nil, fixtureStatus: healthy)
+            SettingsGeneralView(store: healthyStore)
         }
+        let issueStore = SettingsStore()
+        issueStore.status = issue
         capture(name: "settings-general-issue", to: outDir, size: NSSize(width: 520, height: 620), log: &log) {
-            SettingsGeneralView(store: SettingsStore(), health: nil, fixtureStatus: issue)
+            SettingsGeneralView(store: issueStore)
         }
     }
 
@@ -201,7 +206,7 @@ enum UISnapshotHarness {
     private static func logKeyboardNavigation(to outDir: URL, log: inout [String]) {
         log.append("== Key-view loop ==")
         let tabs: [(String, () -> NSView)] = [
-            ("General", { NSHostingController(rootView: SettingsGeneralView(store: SettingsStore(), health: nil)).view }),
+            ("General", { NSHostingController(rootView: SettingsGeneralView(store: SettingsStore())).view }),
             ("Appearance", { NSHostingController(rootView: SettingsAppearanceView(store: SettingsStore())).view }),
             ("Dictation", { NSHostingController(rootView: SettingsDictationView(store: SettingsStore())).view }),
             ("LearnedWords", { NSHostingController(rootView: SettingsLearnedWordsView()).view }),

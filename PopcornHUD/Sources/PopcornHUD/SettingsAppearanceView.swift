@@ -11,16 +11,14 @@ import PopcornCore
 /// `onAppear`/`onDisappear` alone do not fire reliably for window-level visibility changes.
 struct SettingsAppearanceView: View {
     @ObservedObject var store: SettingsStore
-    let health: DictationHealthMonitor?
     @State private var intensity: SyntheticIntensity = .normal
     @StateObject private var engine: AppearancePreviewEngine
 
     /// `fixtureEngine`, when provided (harness-only), is used as-is instead of a fresh engine -
     /// e.g. one already `preroll`ed a couple of seconds so a snapshot shows motion mid-animation
     /// instead of frame zero.
-    init(store: SettingsStore, health: DictationHealthMonitor? = nil, fixtureEngine: AppearancePreviewEngine? = nil) {
+    init(store: SettingsStore, fixtureEngine: AppearancePreviewEngine? = nil) {
         self.store = store
-        self.health = health
         _engine = StateObject(wrappedValue: fixtureEngine ?? AppearancePreviewEngine())
     }
 
@@ -54,11 +52,14 @@ struct SettingsAppearanceView: View {
                 HStack {
                     Spacer(minLength: 0)
                     TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !engine.running)) { context in
+                        // `drawScene` draws in full 260x420 card coordinates - the Canvas must be
+                        // sized to match that before scaling down, or its content clips against a
+                        // too-small canvas before the scale even applies (H-2).
                         Canvas { ctx, _ in
                             let scene = engine.advance(to: context.date, mascot: store.prefs.mascot)
                             PopcornRenderer.drawScene(ctx: &ctx, scene: scene)
                         }
-                        .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
+                        .frame(width: Tunables.cardW, height: Tunables.cardH)
                         .scaleEffect(0.62, anchor: .center)
                         .frame(width: Tunables.cardW * 0.62, height: Tunables.cardH * 0.62)
                     }
@@ -85,12 +86,14 @@ struct SettingsAppearanceView: View {
         .onAppear {
             engine.setIntensity(intensity)
             engine.setTabVisible(true)
-            // The preview must never compete with a live dictation's HUD rendering on main.
-            health?.addListener { status in
-                engine.setHUDActive(status.daemon.isHot || status.daemon.isTranscribing)
-            }
+            engine.setHUDActive(store.status.daemon.isHot || store.status.daemon.isTranscribing)
         }
         .onDisappear { engine.setTabVisible(false) }
+        // `store.status` comes from SettingsStore's single, window-lifetime health listener
+        // (M-7) rather than this view adding its own on every appearance.
+        .onChange(of: store.status) { newStatus in
+            engine.setHUDActive(newStatus.daemon.isHot || newStatus.daemon.isTranscribing)
+        }
     }
 }
 
@@ -135,7 +138,10 @@ final class AppearancePreviewEngine: ObservableObject {
 
     init() {
         sim.reduceMotion = reduceMotion
-        reduceMotionObserver = NotificationCenter.default.addObserver(
+        // Posted on NSWorkspace's own notification center, not NotificationCenter.default (L-2) -
+        // using the wrong one meant toggling Reduce Motion while Settings was open silently did
+        // nothing here, even though the HUD (which uses the right center) picked it up.
+        reduceMotionObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
@@ -147,7 +153,7 @@ final class AppearancePreviewEngine: ObservableObject {
     }
 
     deinit {
-        if let reduceMotionObserver { NotificationCenter.default.removeObserver(reduceMotionObserver) }
+        if let reduceMotionObserver { NSWorkspace.shared.notificationCenter.removeObserver(reduceMotionObserver) }
         windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
