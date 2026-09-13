@@ -87,6 +87,13 @@ else
   echo "==> Ad-hoc development build (not for public distribution)"
   SIGN_ARGS=(--force --sign -)
 fi
+# Strip debug symbol-table entries (N_OSO stabs) before signing. The linker records the
+# absolute path of every object file there, and -debug-prefix-map does not rewrite it,
+# so an unstripped binary leaks the builder's home directory.
+echo "==> Stripping debug symbols"
+for bin in "$CONTENTS/MacOS/VoicePop" "$CONTENTS/MacOS/voxtype-clean"; do
+  [[ -f "$bin" ]] && strip -S "$bin"
+done
 # Sign nested code first; --deep is used only for verification.
 HELPER="$CONTENTS/Helpers/Voxtype.app"
 if [[ -d "$HELPER" ]]; then
