@@ -162,6 +162,17 @@ public enum LastHistoryEntryCache {
         }
     }
 
+    /// Test/harness-only: sets the cache to a known value synchronously, so a test can make
+    /// `currentAsync`/`refreshAsync`'s "already loaded" fast path deterministic instead of racing
+    /// a real disk read.
+    public static func seedForTesting(_ entry: HistoryEntry?) {
+        lock.lock()
+        generation &+= 1
+        cached = entry
+        loaded = true
+        lock.unlock()
+    }
+
     /// Synchronously marks the cache empty-and-loaded. Call right after `HistoryStore.clear()`
     /// succeeds (L-3): the caller already knows for a fact there is nothing left, so this is pure
     /// bookkeeping, not a disk read, and is safe on the main thread.

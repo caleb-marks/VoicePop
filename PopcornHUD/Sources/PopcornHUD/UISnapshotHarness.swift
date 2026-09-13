@@ -72,29 +72,68 @@ enum UISnapshotHarness {
         func textViews(_ view: NSView) -> [NSTextView] {
             (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
         }
+        // Present a fixture entry, seed LastHistoryEntryCache to match it (so the real present()
+        // - which always resolves through the cache, not the fixture parameter - resolves to the
+        // *same* entry), simulate a user edit, then call the real present() and pump the run loop
+        // briefly for its async cache read to complete. This exercises the actual "same entry
+        // already open" path (N2-M2's fix), not just the fixture path.
+        let entry = HistoryEntry(
+            ts: "2026-01-01T00:00:00Z", app: "Ghostty", style: "casual",
+            raw: "raw fixture", rules: "rules fixture", out: "Fixture out.", llm: false
+        )
+        LastHistoryEntryCache.seedForTesting(entry)
+        editor.presentFixture(entry: entry, correctedText: entry.out)
         guard let content = editor.window?.contentView,
-              let text = textViews(content).first else { fatalError("Missing correction editor") }
-        let edited = text.string
+              let text = textViews(content).first else {
+            log.append("FAIL: verifyEditorRecovery could not find the correction editor's text view")
+            return
+        }
+        text.string = "Edited by the harness."
+        editor.textDidChange(Notification(name: NSText.didChangeNotification, object: text))
         editor.present()
-        precondition(text.string == edited, "Reopening correction discarded edits")
-        log.append("PASS: reopening correction preserves the edited text")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        if text.string == "Edited by the harness." {
+            log.append("PASS: reopening correction for the same entry preserves the edited text")
+        } else {
+            log.append("FAIL: reopening correction for the same entry discarded edits (got \"\(text.string)\")")
+        }
 
         let model = LearnedWordsViewModel()
         model.load()
-        guard let old = model.entries.first else { fatalError("Missing learned-word fixture") }
+        guard let old = model.entries.first else {
+            log.append("FAIL: verifyEditorRecovery missing learned-word fixture")
+            return
+        }
         var updated = Replacements.load()
         updated.entries.append(Replacement(from: "concurrentword", to: "ConcurrentWord", count: 1, lastTs: "fixture"))
-        try! updated.save()
+        try? updated.save()
         model.delete(old)
-        precondition(Replacements.load().entries.contains { $0.from == "concurrentword" }, "Lost concurrent learned word")
-        let valid = try! Data(contentsOf: VoicePopPaths.replacements)
+        if Replacements.load().entries.contains(where: { $0.from == "concurrentword" }) {
+            log.append("PASS: learned-word edits preserve a concurrently-added word")
+        } else {
+            log.append("FAIL: learned-word edit lost a concurrently-added word")
+        }
+
+        // N2-M3: a save failure must not drop the edit just because a later edit succeeds.
+        // Corrupt the file mid-session, queue a failing edit, then repair the file and queue a
+        // second edit - both must land, not just the second.
+        guard let valid = try? Data(contentsOf: VoicePopPaths.replacements) else {
+            log.append("FAIL: verifyEditorRecovery could not read replacements.json")
+            return
+        }
         let malformed = Data("{broken".utf8)
-        try! malformed.write(to: VoicePopPaths.replacements)
-        _ = model.add(from: "secondword", to: "corrected phrase")
-        precondition(model.saveError != nil)
-        precondition(try! Data(contentsOf: VoicePopPaths.replacements) == malformed, "Overwrote malformed file")
-        try! valid.write(to: VoicePopPaths.replacements)
-        log.append("PASS: learned-word edits preserve concurrent additions and reject newly malformed data")
+        try? malformed.write(to: VoicePopPaths.replacements)
+        _ = model.add(from: "firstword", to: "first phrase")
+        let switchedToMalformed = model.loadState == .malformed
+        try? valid.write(to: VoicePopPaths.replacements)
+        model.retrySave()
+        _ = model.add(from: "secondword", to: "second phrase")
+        let onDisk = Replacements.load().entries.map(\.from)
+        if switchedToMalformed, onDisk.contains("firstword"), onDisk.contains("secondword") {
+            log.append("PASS: a failed edit is retried and kept alongside a later successful one (N2-M3)")
+        } else {
+            log.append("FAIL: N2-M3 queue check - switchedToMalformed=\(switchedToMalformed) onDisk=\(onDisk)")
+        }
     }
 
     // MARK: - Rendering
@@ -225,9 +264,13 @@ enum UISnapshotHarness {
             log.append("-- \(name) --")
             for item in menu.items {
                 if item.isSeparatorItem { log.append("   ---"); continue }
+                // Log what NSMenuItemValidation actually returns, not the stored `isEnabled`
+                // property - AppKit's autoenablesItems silently overrides the latter for any
+                // targeted item, which is exactly what made N2-M1 invisible in earlier logs.
+                let validated = item.target.flatMap { $0 as? NSMenuItemValidation }?.validateMenuItem(item) ?? item.isEnabled
                 let flags = [
                     item.isHidden ? "hidden" : "visible",
-                    item.isEnabled ? "enabled" : "disabled",
+                    validated ? "enabled" : "disabled",
                 ].joined(separator: ", ")
                 log.append("   \"\(item.title)\" [\(flags)]")
             }
