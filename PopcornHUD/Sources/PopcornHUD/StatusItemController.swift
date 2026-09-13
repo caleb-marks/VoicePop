@@ -173,11 +173,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// model that isn't even the active one. Scoped to the three issues that truly mean dictation
     /// cannot start right now. Switch to `lastStatus.canDictate` once WS3 narrows it.
     private var startRecordingEnabled: Bool {
-        if lastState.isHot { return true }
-        switch lastStatus.issue {
-        case .engineNotInstalled, .modelMissing, .engineNotRunning: return false
-        default: return true
-        }
+        // polish-shared (lead): one definition of "dictation can start" with health.
+        lastState.isHot || lastStatus.canDictate
     }
 
     private func updateRecordEnabled() {

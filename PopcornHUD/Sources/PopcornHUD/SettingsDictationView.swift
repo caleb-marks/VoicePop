@@ -186,7 +186,10 @@ final class ModelListViewModel: ObservableObject {
         // closed and deallocated mid-download, health still needs to hear that the download
         // ended, and the engine still needs its restart - neither should silently no-op just
         // because nothing is observing the UI anymore.
-        let health = healthProvider()
+        // Main-thread-only monitor carried through the runner's @Sendable progress callback; every
+        // use below hops back to the main queue first.
+        let healthRef = MainThreadRef(healthProvider())
+        let health = healthRef.value
         if needsDownload {
             health?.noteModelDownload(EngineFacts.Download(model: id, fraction: nil))
             downloadFraction = nil
@@ -202,7 +205,7 @@ final class ModelListViewModel: ObservableObject {
                             // DictationHealthMonitor is main-thread only, like the rest of this
                             // view model's own @Published writes.
                             DispatchQueue.main.async {
-                                health?.noteModelDownload(EngineFacts.Download(model: id, fraction: fraction))
+                                healthRef.value?.noteModelDownload(EngineFacts.Download(model: id, fraction: fraction))
                                 self?.downloadFraction = fraction
                                 self?.downloadMessage = String(format: "Downloading… %.1f of %.1f GB", bytesGB, totalGB)
                             }
@@ -213,7 +216,7 @@ final class ModelListViewModel: ObservableObject {
                 }
                 try runner.setModel(id)
                 DispatchQueue.main.async {
-                    health?.noteModelDownload(nil)
+                    healthRef.value?.noteModelDownload(nil)
                     EngineControl.restart()
                     guard let self else { return }
                     self.downloadingID = nil
@@ -225,7 +228,7 @@ final class ModelListViewModel: ObservableObject {
                     // Clear the download indicator regardless of whether the view model is still
                     // around to show `failure` - otherwise the menu keeps reporting a download
                     // that is no longer happening.
-                    health?.noteModelDownload(nil)
+                    healthRef.value?.noteModelDownload(nil)
                     guard let self else { return }
                     self.downloadingID = nil
                     self.failure = error.localizedDescription
@@ -233,4 +236,10 @@ final class ModelListViewModel: ObservableObject {
             }
         }
     }
+}
+
+/// Carries a main-thread-only reference across a `@Sendable` closure. Read `value` only on main.
+private final class MainThreadRef<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }
