@@ -37,6 +37,10 @@ final class SettingsStore: ObservableObject {
         ) { [weak self] note in
             guard let self, (note.object as? ObjectIdentifier) != ObjectIdentifier(self) else { return }
             self.prefs = StylePrefsCache.current()
+            // The cache just changed from elsewhere (the menu, or another Settings window) - a
+            // pending error about a now-superseded attempted value would be stale and confusing
+            // next to the freshly reloaded one (R3-L2).
+            self.saveError = nil
         }
     }
 
@@ -47,9 +51,13 @@ final class SettingsStore: ObservableObject {
 
     /// Re-reads the cache. Call when the Settings window is (re)shown, in case the menu bar
     /// changed a style while the window was hidden (no notification would have fired then, since
-    /// this instance didn't exist or wasn't observing yet in that exact window).
+    /// this instance didn't exist or wasn't observing yet in that exact window). Also drops any
+    /// stale `saveError` (R3-L2): showing an old error next to a freshly reloaded value - possibly
+    /// the very value that failed to save last time, now silently "current" again - was worse
+    /// than just clearing it.
     func refreshFromCache() {
         prefs = StylePrefsCache.current()
+        saveError = nil
     }
 
     /// One-time registration for the store's (and so the window's) lifetime. Safe to call

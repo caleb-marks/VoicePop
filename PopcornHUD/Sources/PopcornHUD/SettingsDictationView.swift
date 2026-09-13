@@ -17,6 +17,19 @@ struct SettingsDictationView: View {
 
     var body: some View {
         Form {
+            // Pinned at the top (R3-L2): this used to show only under "Local AI polishing", off
+            // the bottom of a 620pt window whenever the failure came from the Global style picker
+            // or a per-app override at the top of "Writing style" instead.
+            if let error = store.saveError {
+                Section {
+                    HStack {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        Button("Retry") { store.save() }
+                    }
+                }
+            }
+
             Section("Speech model") {
                 ForEach(VoxtypeModel.catalog, id: \.id) { choice in
                     modelRow(choice)
@@ -85,13 +98,6 @@ struct SettingsDictationView: View {
                 Text("Optional. Runs entirely on this Mac over loopback - no text ever leaves the device.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let error = store.saveError {
-                    HStack {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                        Spacer()
-                        Button("Retry") { store.save() }
-                    }
-                }
             }
         }
         .formStyle(.grouped)

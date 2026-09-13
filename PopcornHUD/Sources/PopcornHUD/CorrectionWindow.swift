@@ -32,6 +32,10 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     /// "Fix Last Dictation" for a different entry saw "unsaved edits" that had, in fact, already
     /// been saved, and showed a false "Discard unsaved correction?" prompt every time.
     private var isDirty = false
+    /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): fires at the end of every `presentResolved`, so a
+    /// test can wait for the real, asynchronous `present()` → `refreshAsync` → `presentResolved`
+    /// chain to actually finish instead of guessing a fixed delay (R3-L4).
+    var onPresentResolved: (() -> Void)?
 
     /// Harness-only (`VOICEPOP_UI_SNAPSHOT`): builds and populates the window from a fixture
     /// entry without touching `HistoryStore`, optionally showing the inline error+Retry state.
@@ -65,6 +69,7 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
     }
 
     private func presentResolved(_ entry: HistoryEntry?) {
+        defer { onPresentResolved?() }
         guard let entry else {
             let alert = NSAlert()
             alert.messageText = "Nothing to fix yet"
@@ -74,18 +79,18 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
             returnFocus()
             return
         }
-        // Same entry already open (this also covers two rapid menu requests completing
-        // asynchronously in either order, since both resolve to the same last entry): just bring
-        // it forward. Resetting here (the old behavior) discarded in-progress edits and, worse,
-        // replaced `saver` - so a Retry after a save failure lost track of what it had already
-        // appended and could duplicate the corrections.jsonl record (M-2).
-        if built, let window, window.isVisible, self.entry?.ts == entry.ts {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(textView)
+        // Same entry already loaded - whether the window is still visible, or was closed with
+        // the title-bar X while dirty (R3-L3) - bring it back exactly as it was left, never
+        // reset. Checking only `window.isVisible` (the earlier fix) meant closing with the X
+        // hid the window without clearing `isDirty`, so the very next "Fix Last Dictation…" for
+        // that *same* entry fell through to the "different entry" branch below, produced a
+        // nonsensical "discard unsaved edits to the previous one" prompt about the entry it was
+        // already about to reopen, and Cancelling that prompt left the hidden window unreachable.
+        if built, self.entry?.ts == entry.ts {
+            showWindow()
             return
         }
-        // A *different* entry than the one currently open, with edits the user hasn't saved yet
+        // A *different* entry than the one currently loaded, with edits the user hasn't saved yet
         // (isDirty - N2-M2 - not "does the text differ from entry.out", which stayed true forever
         // after a successful save and produced a false prompt on every subsequent correction).
         if isDirty {
@@ -96,7 +101,14 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
             alert.addButton(withTitle: "Discard and Continue")
             alert.addButton(withTitle: "Cancel")
             NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                // Cancel must not strand the user: if the old window is only hidden (closed via
+                // the X, not actually gone), bring it back so the edits it's asking about are
+                // still reachable (R3-L3) - otherwise every later request just prompts again with
+                // no way to ever reach them.
+                if built { showWindow() }
+                return
+            }
         }
         self.entry = entry
         self.saver = CorrectionSaver()
@@ -105,6 +117,10 @@ final class CorrectionWindowController: NSWindowController, NSWindowDelegate, NS
         rawLabel?.stringValue = "What I heard: \(entry.raw)"
         textView?.string = entry.out
         setError(nil)
+        showWindow()
+    }
+
+    private func showWindow() {
         guard let window else { return }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
