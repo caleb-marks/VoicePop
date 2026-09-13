@@ -165,8 +165,12 @@ public enum Tunables {
     public static let restingDamping: Double = 26
     public static let restingSlideDrag: Double = 5.5
     public static let restingSpinDrag: Double = 6.5
-    /// Deepest a resting kernel nestles into the pile, in pt.
-    public static let restingNestleMax: Double = 3
+    /// Deepest a resting kernel nestles into the pile, in pt. Varied per kernel so resting
+    /// kernels scatter through the mound instead of lining up along one surface curve.
+    public static let restingNestleMax: Double = 7
+    /// Downhill pull on a resting kernel per unit of surface slope (pt/s²): it slips a little
+    /// down the mound before friction stops it.
+    public static let restingSlopePull: Double = 90
 }
 
 public struct HeapPiece: Equatable, Sendable {
